@@ -1,7 +1,9 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, zs, pandas, srilm, pdb, json, multiprocessing
+import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy
+from zs import ZS
+from scipy import stats
 
 #ngrok library
 class Worker(multiprocessing.Process): 
@@ -17,6 +19,7 @@ class Worker(multiprocessing.Process):
 
 def processGoogleDirectory(inputdirectory, outputdirectory, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
 	'''Parallelized, load-balanced execution of processGoogle, starting with the largest files'''
+	start_time =  time.time()
 
 	# Put the manager in charge of how the processes access the list
 	mgr = multiprocessing.Manager()
@@ -49,6 +52,8 @@ def processGoogleDirectory(inputdirectory, outputdirectory, yearbin, quiet, n, e
         
 	for item in myList:
 		print(item)
+
+	print('Done! processed '+str(len(myList))+' files; elapsed time is '+str(round(time.time()-startTime /  60., 5))+' minutes') 	
 
 
 def processGoogle(inputfile, outputfile, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
@@ -275,18 +280,19 @@ def makeLanguageModel(inputfile, outputfile, metadata, codec):
 def reverseGoogleFile(inputfile, outputfile):
 	'''Reverse the order of the ngram in a Google-formatted ngram file. Note that this is a different procedure than rearranging the ngram files that are output by AutoCorpus'''
 	print('Reversing existing model')		
-	iff = open(reversibleModel, 'r')
-	off = open(collapsedFile, 'w')
+	iff = open(inputfile, 'r')
+	off = open(outputfile, 'w')
 	for l in iff:		
 		l = l.replace('\n','').replace(' ','\t')
 		strArray = l.split('\t')
 			
-		count = strArray.pop(0)
+		count = strArray.pop(-1)
 		strArray.reverse()
 		strArray.append(count) #move the count to the end, reverse ngram	
 		off.write('\t'.join(strArray)+'\n')
 	iff.close()
 	off.close()
+	print('Done!')
 
 def checkForReversibleModel(lexSurpDir, n, direction):	
 	'''Search for an equivalent model with the ngrams in the opposite order. It is much, much faster, to reverse the text file than to run through the entire processing stack'''
@@ -474,6 +480,54 @@ def rearrangeNgramFile(inputfile, outputfile, reverse):
 	off.close()
 
 
+def marginalizeNgramFile(inputfile, outputfile, n, sorttype):
+	'''collapse counts from inputfile for sequences of length n'''
+	print('Marignalizing over counts from higher-order ngram file to produce counts of '+str(n)+'-grams')
+	#this method is lossy-- not all bigrams present in the dataset will be here--but the counts are consistent with the higher order ngram file.	
+	#!!!inputfile must be sorted for this to work. How do we confirm that it is sorted?	
+	iff = open(inputfile, 'r')
+	tf_path = os.path.join(os.path.dirname(inputfile),next(tempfile._get_candidate_names()))
+	tf = open(tf_path, 'w')
+	firstLine= iff.readline()
+	cachedCount = int(firstLine.split()[-1]) #highest count for an individual trigram
+	cachedNgram = '\t'.join(firstLine.split()[0:n]) #indices are non-inclusive, so N=1 	
+
+	print('Collapsing counts...')
+	for l in iff:
+		parts = l.split()
+		ngram = '\t'.join(parts[0:n])
+		count = int(parts[-1])
+		#if the ngram isn't the same, print out the last trigram and add it to the aggregate count, and restart the count
+		if ngram != cachedNgram:
+			#print('Added to total '+cachedNgram+': '+str(cachedCount))
+			if (sorttype == 'numeric'):
+				tf.write(str(cachedCount)+'\t'+cachedNgram+'\n')
+			elif (sorttype == 'alphabetic'):
+				tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')
+			#restart the count, for the next ngram
+			cachedNgram = ngram
+			cachedCount = count
+		else:
+			#if it is the same, add it to the aggregate count
+			cachedCount += count
+			#print('Increased '+cachedNgram+' count to : '+str(cachedCount))
+	#obligate write of final cached value at the end                
+	if (sorttype == 'numeric'):
+		tf.write(str(cachedCount)+'\t'+cachedNgram+'\n')
+	elif (sorttype == 'alphabetic'):
+		tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')
+	iff.close()
+	tf.close()
+
+	print('Sorting new counts...')
+	#then run sort on the output file
+	if (sorttype == 'numeric'):
+		os.system("sort -n -r "+tf_path+' > '+outputfile) # sorted by descending frequency
+	elif (sorttype == 'alphabetic'):
+		os.system("env LC_ALL=C sort "+tf_path+' > '+outputfile) # sorted alphabetically, suitable for putting into a ZS file         
+	os.remove(tf_path)
+	print('Done!')
+
 def countNgrams(inputfile, outputfile, n):
 	'''Produces an ngram count for a text file using the ngrams command from Autocorpus'''
 	print('Counting the ngrams...')
@@ -500,7 +554,8 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 
 
 
-def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, opus_path, cutoff, outputfile):
+def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wordlist_csv, cutoff, outputfile):
+	start_time = time.time()
 	'''producing mean surprisal estimates given a backwards n-gram language model and a forwards text file (to be read into a hash table) for order n-1. Produces mean information content (mean log probability, weighted by the frequency of each context) as well as sublexical surprisal using Kneser-Ney smoothing on a list of words from an externally-provided wordlist (e.g. top 25k most frequent words in the corpus that are also in OPUS or Switchboard).'''
 
 	print('Loading the backwards ZS file for order n...')
@@ -515,38 +570,42 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, opu
 			val = int(lineElements[2])
 			bigrams[key] = val
 
-	print('Loading unigram file...')	
-	top_words = []
-	uni_sorted_file = open(unigram_txt_path,'rb')
-	for i in range(0,30000):
-		top_words.append(uni_sorted_file.readline().split("\t")[1].rstrip('\n'))
+	print('Loading unigram file...')		
+	uni_sorted_file = pandas.read_table(unigram_txt_path)
+	top_words = uni_sorted_file['word']
 
 	print('Loading OPUS file...')
 	def hasNumbers(inputString):
 		return any(char.isdigit() for char in inputString)
 
-	opus_file = open(opus_path, 'rb')
-	reader = csv.reader(opus_file, delimiter=' ')
-	opus_words = [x[0] for x in list(reader)[1:] if (len(x) != 0 and (not hasNumbers(x[0])))]
-	frequent_words = [w for w in top_words if w in opus_words][:25000]
-
+	wordlist_DF = pandas.read_csv(wordlist_csv)
+	wordlist = wordlist_DF['word'].astype('str').tolist()
+	
+	frequent_words = [w for w in top_words if w in wordlist][:25000]	
 	print('Retrieving lexical surprisal estimates...')
 
 	surprisalEstimates = [get_mean_surp(bigrams, backward_zs, w, cutoff) for w in frequent_words]
+
 	df = pandas.DataFrame(surprisalEstimates)
 	df.columns = ['word','mean_surprisal_weighted','mean_surprisal_unweighted','frequency','numContexts','retrievalTime']
+	df.to_csv(outputfile, index=False)	
+	print('Done! Completed file is at '+outputfile+'; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 
 
+def getSublexicalSurprisals(inputfile, outputfile, n, srilmpath):
+	'''get the probability of each word's letter sequence using the set of words in the language''' 	
 	print('Retrieving sublexical surprisal estimates...')
-	LM = trainSublexicalSurprisalModel(df['word'].astype('str'), order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)
+	df = pandas.read_table(inputfile)
+	if n != -1:
+		df = df.iloc[0:min(n,len(df)-1)]		
+
+	LM = trainSublexicalSurprisalModel(df['word'].astype('str'), order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, srilmPath=srilmpath)
 	#!!! there is something hard coded about the temp file creation that is crashing the process
-	df['ss']   = [ss_helper.getSublexicalSurprisal(word, LM, 5, 'letters', returnSum=True) for word in list(df['word'])]
-	df.to_csv(outputfile)
-
-	print('Done! Completed file is at '+outputfile+'; elapsed time is '+str(round(time.time()-startTime /  60., 5))+' minutes') 
-
+	df['ss']   = [getSublexicalSurprisal(word, LM, 5, 'letters', returnSum=True) for word in list(df['word'])]
+	df.to_csv(outputfile, index=False)
+	print('Done!')
 
 def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):	
-	start_time = time.time()
+	start_time = time.time()	
 	total_freq = 0
 	surprisal_total = 0
 	num_context = 0
@@ -557,7 +616,7 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 		if tri_count >= cutoff:
 			total_freq += tri_count
 			context = r_split[2] + "\t" + r_split[1] + "\t"
-			num_context += 1		
+			num_context += 1	
 			total_context_freq = bigrams_dict[context.encode('utf-8')]	
 			cond_prob = math.log(tri_count / float(total_context_freq))
 			surprisal_total += (tri_count * cond_prob) #this is weighted by the frequency of this context
@@ -601,10 +660,10 @@ def trainSublexicalSurprisalModel(wordList, order, smoothing, smoothOrder, inter
 	# train a model with smoothing on the outfile
 	discounting = ' '.join([''.join(['-', smoothing,'discount', str(x)]) for x in smoothOrder])
 	commandString = 'ngram-count -text '+typeFile+' -order ' + str(order) + ' ' + discounting + (' -interpolate' if interpolate else '') + ' -no-sos -lm ' + modelFile
-	call(commandString, shell=True)
+	subprocess.call(commandString, shell=True)
 
 	# load the language model and return it
-	lm = LM(modelFile, lower=True)
+	lm = srilm.LM(modelFile, lower=True)
 	return(lm)
 
 def getSublexicalSurprisal(targetWord, model, order, method, returnSum):		
@@ -650,5 +709,44 @@ def getSublexicalSurprisal(targetWord, model, order, method, returnSum):
 	else:
 		return(None)
 
-def analyzeSurprisalCorrelations():
-	'''get correlations and plot the relationship between lexical and sublexical surprisal in R in R (to be adapted)'''
+def analyzeSurprisalCorrelations(lexfile, sublexfile, wordlist_csv, outfile):
+	'''get correlations and plot the relationship between lexical and sublexical surprisal'''
+	lex_DF = pandas.read_csv(lexfile)
+	sublex_DF = pandas.read_csv(sublexfile)
+	wordlist_DF = pandas.read_csv(wordlist_csv).drop_duplicates('word')	
+
+	df = lex_DF.merge(sublex_DF, on='word').sort('frequency', ascending=False)	
+
+	df_selected = wordlist_DF.merge(df, on='word').sort('frequency', ascending=False)
+	df_selected['nchar'] = [len(x) for x in df_selected['word']]
+
+	ssCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['ss'])
+	ncharCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['nchar'])
+
+	print ('number of words in analysis: ' + str(len(df_selected)) + ' types')
+	print ("Spearman's rho for lexical and sublexical surprisal:" + str(ssCor))
+	print ("Spearman's rho for lexical and character length:" + str(ncharCor))
+	
+	df_selected.to_csv(outfile, index=False)
+
+def checkForMissingFiles(directory1, pattern1, directory2, pattern2):
+	'''check which files from directory1 are not in directory2'''
+
+	raw_files = glob.glob(os.path.join(directory1,pattern1))
+	raw_filenames = [os.path.splitext(os.path.basename(x))[0] for x in raw_files]
+	print('Directory 1 contains '+str(len(raw_filenames)) + ' files')
+
+
+	processed_files = glob.glob(os.path.join(directory2,pattern2))
+	processed_filenames = [os.path.splitext(os.path.basename(x))[0] for x in processed_files]
+	processed_filenames = [os.path.splitext(os.path.basename(x))[0] for x in processed_filenames]
+
+	if len(raw_filenames) != len(processed_filenames):
+		print('Differeing number of raw and processed files')
+
+		missing = []
+		[missing.append(file) for file in raw_filenames if file not in processed_filenames]
+		print('Missing:')
+		print(missing)
+	else:
+		print('Same number of raw and processed files')	
