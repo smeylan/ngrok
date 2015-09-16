@@ -13,12 +13,30 @@ def cli():
 #makeDirectoryStructure
 @click.command()
 @click.option('--faststoragedir', type=click.Path(), help="Directory on fastest storage medium available")
+@click.option('--slowstoragedir', type=click.Path(), help="Directory on the larges storage medium")
 @click.option('--analysisname', type=str, help="Descriptive name for the analysis")
 @click.option('--corpus', type=str, help="Name of the corpus")
 @click.option('--language', type=str, help="Name of the language")
-def makeDirectoryStructure(faststoragedir, analysisname, corpus, language):
+def makeDirectoryStructure(faststoragedir, slowstoragedir, analysisname, corpus, language):
 	'''build the directory structure for holding the intermediate files and analyses'''
 	ngrok.makeDirectoryStructure(faststoragedir, analysisname, corpus, language)
+
+#cleanGoogle
+@cli.command() 
+@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input')
+@click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)')
+@click.option('--collapseyears', type=bool, help='Collapse the counts over years?')
+def cleanGoogle(inputfile, outputfile, collapseyears):	
+	'''Strip punctuation from google-formatted ngram files and retain only lines that are words alone (e.g. no POS tags)'''	
+	ngrok.cleanGoogle(inputfile, outputfile, collapseyears)
+
+#collapseYears
+@cli.command() 
+@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input')
+@click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)')
+def collapseYears(inputfile, outputfile):	
+	'''Collapse dates from Google-formatted ngram files'''	
+	ngrok.collapseYears(inputfile, outputfile)	
 
 #processGoogle
 @cli.command() 
@@ -38,8 +56,8 @@ def processGoogle(inputfile, outputfile, yearbin, quiet, n, latest, earliest, re
 
 #processGoogleDirectory -- parallelized version of processGoogle
 @cli.command() 
-@click.option('--inputdirectory', type=click.Path(exists=True), help='The directory with the input')
-@click.option('--outputdirectory', type=click.Path(), help='The directory where the processed files should be output')
+@click.option('--inputdir', type=click.Path(exists=True), help='The directory with the input')
+@click.option('--outputdir', type=click.Path(), help='The directory where the processed files should be output')
 @click.option('--yearbin', type=int, default=0, help='How many bins of years?')
 @click.option('--quiet', type=bool, default=True, help= 'Output tossed lines?')
 @click.option('--n', type=int, default=3, help="Order of the ngram")
@@ -48,18 +66,27 @@ def processGoogle(inputfile, outputfile, yearbin, quiet, n, latest, earliest, re
 @click.option('--reverse', type=bool, default=False, help="Reverse the ngram?")
 @click.option('--strippos', type=bool, default=True, help="Strip the part of speech information?")
 @click.option('--lower', type=bool, default=False, help="Convert ngrams to lower case?")
-def processGoogleDirectory(inputdirectory, outputdirectory, yearbin, quiet, n, latest, earliest, reverse, strippos, lower):	
+def processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, latest, earliest, reverse, strippos, lower):	
 	'''Parallelized applicatoin of processGoogle'''	
-	ngrok.processGoogleDirectory(inputdirectory, outputdirectory, yearbin, quiet, n, earliest, latest, reverse, strippos, lower)
+	ngrok.processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, earliest, latest, reverse, strippos, lower)
 
+
+#cleanGoogleDirectory -- parallelized version of cleanGoogle
+@cli.command() 
+@click.option('--inputdir', type=click.Path(exists=True), help='The directory with the input')
+@click.option('--outputdir', type=click.Path(), help='The directory where the processed files should be output')
+@click.option('--collapseyears', type=bool, help='Collapse the counts over years?')
+def cleanGoogleDirectory(inputdir, outputdir, collapseyears):	
+	'''Parallelized application of processGoogle'''	
+	ngrok.cleanGoogleDirectory(inputdir, outputdir, collapseyears)
 
 #combineFiles
 @cli.command()
-@click.option('--inputdirectory', type=click.Path(), help="Directory containing input files")
+@click.option('--inputdir', type=click.Path(), help="Directory containing input files")
 @click.option('--outputfile', type=click.Path(), help="Filename of the output file")
-def combineFiles(inputdirectory, outputfile):
+def combineFiles(inputdir, outputfile):
 	'''Concatenate count files; basically a wrapper for GNU cat'''	
-	ngrok.combineFiles(inputdirectory, outputfile)
+	ngrok.combineFiles(inputdir, outputfile)
 
 #sortNgramFile
 @cli.command()
@@ -96,6 +123,15 @@ def reverseGoogleFile(inputfile, outputfile):
 	''' Reverse the order of all columns but the last (presumably a count) in a Google count file'''
 	ngrok.reverseGoogleFile(inputfile, outputfile)
 
+#deriveFromHigherOrderModel
+@cli.command()
+@click.option('--intermediatefiledir', type=click.Path(), help="Directory with sorted ngram models)
+@click.option('--n', type=int, help="Order of the desired model")
+@click.option('--direction', type=string, help="Direction of the desired model. Specify either forwards or backwards")
+def deriveFromHigherOrderModel(intermediatefiledir, n, direction):
+	'''Search for a pre-computed model from which the desired counts can be derived through some combination of reversing or marginalization. Specify the desired order and direction and the function looks for appropriate files to use in order to create it. This is faster than cleaning the data and deriving new counts.'''
+	ngrok.deriveFromHigherOrderModel(intermediatefiledir, n, direction)
+
 #rearrangeNgramFile
 @cli.command()
 @click.option('--inputfile', type=click.Path(), help="Filename of the input files")
@@ -114,12 +150,6 @@ def rearrangeNgramFile(inputfile, outputfile, reverse):
 def marginalizeNgramFile(inputfile, outputfile, n, sorttype):
 	'''Produce lower-order aggregate counts from higher-order ngram file'''
 	ngrok.marginalizeNgramFile(inputfile, outputfile, n, sorttype)
-
-#download
-@cli.command() 
-def download():
-	'''Requires implementation'''	
-	raise NotImplementedError
 
 #countNgrams
 @cli.command() 
@@ -180,6 +210,14 @@ def analyzeSurprisalCorrelations(lexfile, sublexfile, wordlist_csv, outputfile):
 def checkForMissingFiles(directory1, pattern1, directory2, pattern2):
 	'''check which files from directory1 are not in directory2'''
 	ngrok.checkForMissingFiles(directory1, pattern1, directory2, pattern2)
+
+#downloadCorpus
+@cli.command()
+@click.option('--language', type=str, help="Name of the language to download")
+@click.option('--order', type=int, help="order of ngrams to download")
+@click.option('--inputdir', type=click.Path(), help="path of where to write the downloaded ngram files")
+def downloadCorpus(language, order, inputdir):
+	ngrok.downloadCorpus(language, order, inputdir)
 
 if __name__ == '__main__':
     cli()

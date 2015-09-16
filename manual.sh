@@ -4,7 +4,7 @@
 ngrok makedirectorystructure --faststoragedir /shared_ssd/ss/ --analysisname sep2 --corpus GoogleBooks2012 --language Eng
 
 #clean the google trigrams
-ngrok processgoogledirectory --inputdirectory /shared_hd/corpora/GoogleBooks2012/eng/3/ --outputdirectory /shared_hd/corpora/GoogleBooks2012/eng/3-processed/ --yearbin 0 --quiet True --n 3 --earliest 1800 --latest 2012 --reverse True --strippos True --lower True
+ngrok processgoogledirectory --inputdir /shared_hd/corpora/GoogleBooks2012/eng/3/ --outputdir /shared_hd/corpora/GoogleBooks2012/eng/3-processed/ --yearbin 0 --quiet True --n 3 --earliest 1800 --latest 2012 --reverse True --strippos True --lower True
 
 # check if there are any files from the input directory which are not in the output firectoy
 ngrok checkformissingfiles --directory1 /shared_hd/corpora/GoogleBooks2012/eng/2 --pattern1 *.gz  --directory2 /shared_hd/corpora/GoogleBooks2012/eng/2-processed  --pattern2 *.output.0

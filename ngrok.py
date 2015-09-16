@@ -1,14 +1,28 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy
+import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings
 from zs import ZS
 from scipy import stats
 
 #ngrok library
-class Worker(multiprocessing.Process): 
+
+class cgWorker(multiprocessing.Process):
+	'''single-thread worker for parallelized cleanGoogle function''' 
     def __init__(self,queue,myList):
-        super(Worker, self).__init__()
+        super(cgWorker, self).__init__()
+        self.queue = queue
+        self.myList = myList
+        
+    def run(self):    	
+        for job in iter(self.queue.get, None): # Call until the sentinel None is returned
+        	cleanGoogle(job['inputfile'], job['outputfile'], job['collapseyears'])	
+        	self.myList.append(job['inputfile'])
+
+class pgWorker(multiprocessing.Process): 
+	'''single-thread worker for parallelized processGoogle function''' 
+    def __init__(self,queue,myList):
+        super(pgWorker, self).__init__()
         self.queue = queue
         self.myList = myList
         
@@ -17,7 +31,45 @@ class Worker(multiprocessing.Process):
         	processGoogle(job['inputfile'], job['outputfile'] , job['yearbin'], job['quiet'], job['n'], job['earliest'], job['latest'], job['reverse'], job['strippos'], job['lower'])	
         	self.myList.append(job['inputfile'])
 
-def processGoogleDirectory(inputdirectory, outputdirectory, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
+def cleanGoogleDirectory(inputdir, outputdir, collapseyears):
+	'''Parallelized, load-balanced execution of cleanGoogle, starting with the largest files'''
+	start_time =  time.time()
+
+	# Put the manager in charge of how the processes access the list
+	mgr = multiprocessing.Manager()
+	myList = mgr.list() 
+    
+	# FIFO Queue for multiprocessing
+	q = multiprocessing.Queue()
+    
+	# Start and keep track of processes
+	procs = []
+	for i in range(12):
+		p = cgWorker( q,myList )
+		procs.append(p)
+		p.start()
+                
+	files = glob.glob(inputdir+'*.gz') 
+	filesizes = [(x, os.stat(x).st_size) for x in files]
+	filesizes.sort(key=lambda tup: tup[1], reverse=True)
+	
+	# Add data, in the form of a dictionary to the queue for our processeses to grab    
+	[q.put({"inputfile": file[0], "outputfile": os.path.join(outputdir, os.path.splitext(os.path.basename(file[0]))[0]+'.output'),"collapseyears": collapseyears}) for file in filesizes] 
+      
+	#append none to kill the workers with poison pills		
+	for i in range(12):
+		q.put(None) #24 sentinels to kill 24 workers
+        
+	# Ensure all processes have finished and will be terminated by the OS
+	for p in procs:
+		p.join()     
+        
+	for item in myList:
+		print(item)
+
+	print('Done! processed '+str(len(myList))+' files; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 	
+
+def processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
 	'''Parallelized, load-balanced execution of processGoogle, starting with the largest files'''
 	start_time =  time.time()
 
@@ -31,16 +83,16 @@ def processGoogleDirectory(inputdirectory, outputdirectory, yearbin, quiet, n, e
 	# Start and keep track of processes
 	procs = []
 	for i in range(24):
-		p = Worker( q,myList )
+		p = pgWorker( q,myList )
 		procs.append(p)
 		p.start()
                 
-	files = glob.glob(inputdirectory+'*.gz') 
+	files = glob.glob(inputdir+'*.gz') 
 	filesizes = [(x, os.stat(x).st_size) for x in files]
 	filesizes.sort(key=lambda tup: tup[1], reverse=True)
 	
 	# Add data, in the form of a dictionary to the queue for our processeses to grab    
-	[q.put({"inputfile": file[0], "outputfile": os.path.join(outputdirectory, os.path.splitext(os.path.basename(file[0]))[0]+'.output'), 'yearbin': yearbin, "quiet": quiet, "n":n, "earliest":earliest, "latest":latest, "reverse":reverse, "strippos":strippos, "lower":lower}) for file in filesizes] #!!! limit the scope for testing
+	[q.put({"inputfile": file[0], "outputfile": os.path.join(outputdir, os.path.splitext(os.path.basename(file[0]))[0]+'.output'), 'yearbin': yearbin, "quiet": quiet, "n":n, "earliest":earliest, "latest":latest, "reverse":reverse, "strippos":strippos, "lower":lower}) for file in filesizes] 
       
 	#append none to kill the workers with poison pills		
 	for i in range(24):
@@ -53,13 +105,65 @@ def processGoogleDirectory(inputdirectory, outputdirectory, yearbin, quiet, n, e
 	for item in myList:
 		print(item)
 
-	print('Done! processed '+str(len(myList))+' files; elapsed time is '+str(round(time.time()-startTime /  60., 5))+' minutes') 	
+	print('Done! processed '+str(len(myList))+' files; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 	
+
+
+def collapseYears(inputfile, outputfile):
+	'''aggregate across dates from a google-formatted ngram file'''
+	bufsize = 100000
+	print('Collapsing years...')
+	iff = open(inputfile, 'r')
+	off = open(outputfile, 'w')	
+
+	firstLine= iff.readline()
+	prev_ngram = firstLine.split('\t')[0]
+	cached_count = int(firstLine.split('\t')[2])
+	cached_context_count = int(firstLine.split('\t')[3])		
+	rows =[]
+
+	for c,l in enumerate(iff):
+		line = l.split('\t')
+		ngram = line[0]
+		count = int(line[2])
+		context_count = int(line[3])
+				
+		if(ngram != prev_ngram): #new ngram, write out the cached one
+			rows.append('\t'.join([prev_ngram, str(cached_count), str(cached_context_count) ]))
+			#after appending row to the buffer, reset the storage
+			prev_ngram = ngram
+			cached_count = count		
+			cached_context_count = context_count
+		else:
+			cached_count += count
+			cached_context_count += context_count
+
+		if c % bufsize == 0:	
+			off.write('\n'.join(rows))
+			rows =[] 
+
+	rows.append('\t'.join([prev_ngram, str(cached_count), str(cached_context_count)])) # catch the last record		
+	off.write('\n'.join(rows))	#catch any records since the last buffered write						 
+	iff.close()
+	off.close()
+	print('Finished collapsing years, output in file '+str(inputfile))
+
+def cleanGoogle(inputfile, outputfile, collapseyears):
+	'''Clean google trigram file. This is a highly streamlined version of process google that finds only non POS-tagged lines, with no punctuation, and makes them lowercase, using grep to find lines without punctuation (including _, which excludes lines with POS tags) and perl to lowercase the string, while maintaining the unicode encoding. If collapseyears is true, combine the year counts into a single record'''
+	if collapseyears:
+		tempfile = inputfile+'_temp'
+		cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[[:punct:]]' | perl -CSD -ne 'print lc' > "+tempfile
+		os.system(cleanGoogleCommand)
+		collapseYears(tempfile, outputfile)
+		os.remove(tempfile)
+	else:	
+		cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[[:punct:]]' | perl -CSD -ne 'print lc' > "+outputfile
+		os.system(cleanGoogleCommand)
 
 
 def processGoogle(inputfile, outputfile, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
 	'''Cleans the raw ngram counts from the Google download site, removing POS, capitalization, and reversing the order of the ngram as necessary. Backwards compatible with process-google.py from ngrampy. '''
 	#Adapted from ngrampy
-	BUFSIZE = int(1e6) # We can allow huge buffers if we want...
+	BUFSIZE= int(1e6) # We can allow huge buffers if we want...
 	ENCODING = 'utf-8'
 	LINE_N = n+3 # three extra columns		
 	assert(latest > earliest)		
@@ -224,10 +328,10 @@ def remove_punctuation(text, tbl):
 	'''remove punctuation from UTF8 strings given a character table'''
 	return text.translate(tbl)
 
-def combineFiles(inputdirectory, outputfile):
+def combineFiles(inputdir, outputfile):
 	'''combines a set of text files into a single file; a wrapper for GNU cat'''
 	print('Combining the cleaned files...')	
-	catCommand = 'cat '+os.path.join(inputdirectory,'*.output.0')+' > '+outputfile
+	catCommand = 'cat '+os.path.join(inputdir,'*.output.0')+' > '+outputfile
 	subprocess.call(catCommand, shell=True)
 	print('Done!')
 
@@ -282,77 +386,123 @@ def reverseGoogleFile(inputfile, outputfile):
 	print('Reversing existing model')		
 	iff = open(inputfile, 'r')
 	off = open(outputfile, 'w')
-	for l in iff:		
-		l = l.replace('\n','').replace(' ','\t')
+	for l in iff:				
 		strArray = l.split('\t')
-			
-		count = strArray.pop(-1)
-		strArray.reverse()
-		strArray.append(count) #move the count to the end, reverse ngram	
+		ngram = strArray[0].split(' ')
+		strArray[0] = ' '.join(ngram[::-1])
 		off.write('\t'.join(strArray)+'\n')
 	iff.close()
 	off.close()
 	print('Done!')
 
-def checkForReversibleModel(lexSurpDir, n, direction):	
-	'''Search for an equivalent model with the ngrams in the opposite order. It is much, much faster, to reverse the text file than to run through the entire processing stack'''
+def deriveFromHigherOrderModel(intermediatefiledir, n, direction):	
+	'''Search for a pre-computed model from which the desired counts can be derived either through reversing or marginalization'''
 	if direction == 'forwards':
 		oppositeDirection = 'backwards'
 	elif direction == 'backwards':
 		oppositeDirection = 'forwards'		
-	return(glob.glob(os.path.join(lexSurpDir,str(n)+'gram-'+oppositeDirection+'-collapsed.txt')))
+	
+	#first look for a model in the same direction that is larger than the desired n
 
-def getGoogleBooksLanguageModel(corpusSpecification, n, reverse):
+	availableModels = glob.glob(os.path.join(intermediatefiledir,+'*'+direction+'-sorted.txt'))
+	modelOrders = [os.path.basename(x)[0] for x in availableModels if x > n]
+	if len(modelOrders) > 0:
+		NtoUse = modelOrders.index(min(modelOrders))
+		inputfile = os.path.join(intermediatefiledir,+str(NtoUse)+'-'+direction+'-sorted.txt')
+		outputfile = os.path.join(intermediatefiledir,+str(n)+'-'+direction+'-sorted.txt')
+		marginalizeNgramFile(inputfile, outputfile, n, 'alphabetic')
+		return(outputfile)
+	else: #no models in the same direction, may need to reverse one
+		availableModels = glob.glob(os.path.join(intermediatefiledir,+'*'+oppositeDirection+'-sorted.txt'))	 #look for ones of the opposite direction		
+		modelOrders = [os.path.basename(x)[0] for x in availableModels if x > n]
+
+		if len(modelOrders) > 0: # if theere is at least one higher-order opposite-direction model
+			
+			#marginalize it	
+			NtoUse = modelOrders.index(min(modelOrders))
+			inputfile = os.path.join(intermediatefiledir,+str(NtoUse)+'-'+oppositeDirection+'-sorted.txt')
+			mariginalizedfile = os.path.join(intermediatefiledir,+str(n)+'-'+oppositeDirection+'-marignalized.txt')
+			marginalizeNgramFile(inputfile,marginalizedfile, n, 'alphabetic')
+
+			#reverse it
+			desiredDirectionFile = os.path.join(intermediatefiledir,+str(n)+'-'+direction+'-reversed.txt')
+			reverseGoogleFile(marginalizedfile, desiredDirectionFile)
+
+			#sort it
+			sortedFile = os.path.join(intermediatefiledir,+str(n)+'-'+direction+'-sorted.txt')
+			sortNgramFile(desiredDirectionFile, sortedFile)
+			return(sortedFile)
+		else:
+			return(None) #no appropriate models found	
+
+
+def getGoogleBooksLanguageModel(corpusSpecification, n, reverse, collapseyears):
 	'''Metafunction to create a ZS language model from Google Ngram counts. Does a linear cleaning, merges the file into a single document, sorts it, collapses identical prefixes, and builds the ZS file.'''
 	startTime = time.time()
 	lexSurpDir = os.path.join(corpusSpecification['faststoragedir'], corpusSpecification['analysisname'],corpusSpecification['corpus'],corpusSpecification['language'],'00_lexicalSurprisal')
+
+
 	direction = 'backwards' if reverse else 'forwards'
+	if not collapseyears: #keeping dates is too large to keep the intermediate files on the ssd			
+			intermediateFileDir = os.path.join(corpusSpecification['slowstoragedir'],corpusSpecification['corpus'],corpusSpecification['language'])
+		else:
+			intermediateFileDir	= lexSurpDir
 	
 	zs_metadata = { 
-	"corpus": corpusSpecification['corpus'],
-	"langauge": corpusSpecification['language'],
-	"n": n,
-	"direction": direction
+		"corpus": corpusSpecification['corpus'],
+		"langauge": corpusSpecification['language'],
+		"n": n,
+		"direction": direction
 	}
 	print zs_metadata
 	
 	print('Checking if there are appropriate cleaned text files to create lower-order language model...')
 
-	reversibleModel = checkForReversibleModel(lexSurpDir, n, direction)
-	collapsedFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'-collapsed.txt')
+	tryHigher = deriveFromHigherOrderModel(intermediateFileDir ,n, direction)
 
-	if len(reversibleModel) > 0:		
-		reverseGoogleFile(reversibleModel, collapsedFile)			
+	if tryHigher is not None:
+		print('Derived model from higher order model, results are at '+str(tryHarder))
 	else:	
-		print('No higher-order models found. Cleaning the input files... grab a coffee, this may take some days')
-		#!!! appropriate parallelization depends on how we choose to speed this up
-		#!!! special attention to filenames in processGoogle
-		#!!! unzip the files to the SSD for faster processing
-		#clean			
-		inputfile = os.path.join(scorpusSpecification['lowStorageDir'],corpusSpecification['corpus'],corpusSpecification['language'],str(n),{})
-		cleanedFiles = os.path.join(corpusSpecification['slowStorageDir'],corpusSpecification['corpus'],corpusSpecification['language'],'3-processed',analysis, '*.output.0')
-		processGoogle(inputfile,cleanedFiles, yearbin = 0, quiet=True, n=n, earliest=1800, latest=2012, reverse=reverse, strippos=True, lower=True)
-			
-		#combine
-		combinedFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'.txt')
-		combineFiles(cleanedFiles, combinedFile)
+		print('No higher-order / reversible models found. Cleaning the input files... If n > 3, this is a good time to grab a coffee, this will take a few hours.')
 		
-		#sort
-		sortedFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'-sorted.txt')
-		sortNgramFile(combinedFile, sortedFile)
+		#find only lines without POS tags and make them lowercase
+		inputdir = os.path.join(corpusSpecification['inputdir'],corpusSpecification['corpus'],corpusSpecification['language'],str(n),{})
+		outputdir = os.path.join(corpusSpecification['slowstoragedir'],corpusSpecification['corpus'],corpusSpecification['language',str(n)+'-processed'])	
 
-		#collapse
-		collapseNgramFile(sortedFile, collapsedFile)
+		cleanGoogleDirectory(inputdir,outputdir, collapseyears)
+
+		checkForMissingFiles(inputdir, '*.gz', outputdir, '*.output')
+		
+		cleanedFiles = glob.glob(os.path.join(outputdir,'*.output'))
+		
+		
+
+		
+		combinedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-combined.txt')
+		combineFiles(cleanedFiles, combinedfile)
+
+		#reverse if desired. Make sure that this is tolerant
+		if reverse:
+			reversedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-reversed.txt')
+			reverseGoogleFile(combinedfile, reversedfile)
+			fileToSort = reversedFile
+		else:	
+			fileToSort = combinedfile
+		
+		#sort it	
+		#!!! does sorting with locale C lose any of the UTF8 data
+		sortedFile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-sorted.txt')
+		sortNgramFile(fileToSort, sortedFile)		
 							
 	#build the language model	
 	zsFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'.zs')	
-	makeLanguageModel(collapsedFile, zsFile, zs_metadata, codec="none")
+	makeLanguageModel(sortedFile, zsFile, zs_metadata, codec="none")
 
 	print('Done! Completed file is at '+zsFile+'; elapsed time is '+str(round(time.time()-startTime, 5))+' seconds') 
 
 
-def makeDirectoryStructure(faststoragedir, analysisname, corpus, language):
-	print('Creating directories for analyses at '+os.path.join(faststoragedir, analysisname, corpus, language)+'...')	
+def makeDirectoryStructure(faststoragedir, slowstoragedir, analysisname, corpus, language):		
+	print('Creating fast storage directory at '+os.path.join(faststoragedir, analysisname, corpus, language)+'...')	
 
 	corpusLanguagePath = os.path.join(faststoragedir, analysisname, corpus, language)				
 	lexSurpDir = os.path.join(faststoragedir, analysisname,corpus,language,'00_lexicalSurprisal')
@@ -367,11 +517,24 @@ def makeDirectoryStructure(faststoragedir, analysisname, corpus, language):
 		os.makedirs(sublexSurpDir)
 	if not os.path.exists(correlationsDir):
 		os.makedirs(correlationsDir)
-	print('Directories created!')
-	return lexSurpDir, sublexSurpDir, correlationsDir
+	print('Fast directories created!')
+
+	processedDir = os.path.join(slowstoragedir, analysisname, corpus, language)
+	print('Creating slow storage directory at '+processedDir+'...')	
+	if not os.path.exists(processedDir):
+		os.makedirs(processedDir)
+
+	#create directories for all n, n-1, 1	
+	ordersToMake = [n, n-1, 1]
+	for i in ordersToMake:
+		pathToMake = os.path.join(processedDir, i+'-processed')
+		if not os.path.exists(pathToMake):
+			os.makedirs(pathToMake)
+
+	return lexSurpDir, sublexSurpDir, correlationsDir, processedDir
 
 
-def analyzeCorpus(corpusSpecification, analysisname, faststoragedir, slowStorageDir):
+def analyzeCorpus(corpusSpecification, analysisname):
 	'''Conducts the analysis on a given dataset (corpus + language).'''
 	
 	corpus = corpusSpecification['corpus'] 
@@ -379,13 +542,12 @@ def analyzeCorpus(corpusSpecification, analysisname, faststoragedir, slowStorage
 	n = corpusSpecification['order'] 
 	print('Processing '+corpus+':'+language)
 
-	lexSurpDir, sublexSurpDir, correlationsDir = makeDirectoryStructure(faststoragedir, analysisname, corpus, language)	
+	lexSurpDir, sublexSurpDir, correlationsDir, processedDir = makeDirectoryStructure(corpusSpecification['fastStorageDir'], analysisname, corpusSpecification['corpus'], corpusSpecification['langauge'])	
 
 	if (corpus == 'GoogleBooks2012'):
-		if (language == 'eng'):
-
+		if (language == 'eng'):						
 			print('Checking if input files exist...')
-			#!!! check if files extant; if not, then download
+			#!!! check if input and model files are extant; if not, then download-- this is where we should ha
 			
 			print('Building language models...')
 			# get backwards-indexed model of highest order (n)
@@ -419,9 +581,11 @@ def analyzeCorpus(corpusSpecification, analysisname, faststoragedir, slowStorage
 
 
 	#shared by all datasets once 	
-	#!!! implement this
-	#getMeanSurprisal.py
-	'/shared_hd/corpora/OPUS/en_opus_wordlist.csv'
+	#!!!lexfile is prodduced above
+	getSublexicalSurprisals(inputfile, outputfile, n, srilmpath)
+	#this should produce the sublex
+	analyzeSurprisalCorrelations(lexfile, sublexfile, '/shared_hd/corpora/OPUS/en_opus_wordlist.csv', outfile)
+	
 	#analyzeSurprisalCorrelations.py
 
 def getPlaintextLanguageModel(corpusSpecification, n, reverse, cleaningFunction):	
@@ -717,9 +881,9 @@ def analyzeSurprisalCorrelations(lexfile, sublexfile, wordlist_csv, outfile):
 
 	df = lex_DF.merge(sublex_DF, on='word').sort('frequency', ascending=False)	
 
-	df_selected = wordlist_DF.merge(df, on='word').sort('frequency', ascending=False)
-	df_selected['nchar'] = [len(x) for x in df_selected['word']]
-
+	df_selected = wordlist_DF.merge(df, on='word').sort('frequency', ascending=False).dropna()
+	df_selected['nchar'] = [len(x) for x in df_selected['word']]	
+	
 	ssCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['ss'])
 	ncharCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['nchar'])
 
@@ -735,8 +899,6 @@ def checkForMissingFiles(directory1, pattern1, directory2, pattern2):
 	raw_files = glob.glob(os.path.join(directory1,pattern1))
 	raw_filenames = [os.path.splitext(os.path.basename(x))[0] for x in raw_files]
 	print('Directory 1 contains '+str(len(raw_filenames)) + ' files')
-
-
 	processed_files = glob.glob(os.path.join(directory2,pattern2))
 	processed_filenames = [os.path.splitext(os.path.basename(x))[0] for x in processed_files]
 	processed_filenames = [os.path.splitext(os.path.basename(x))[0] for x in processed_filenames]
@@ -746,7 +908,26 @@ def checkForMissingFiles(directory1, pattern1, directory2, pattern2):
 
 		missing = []
 		[missing.append(file) for file in raw_filenames if file not in processed_filenames]
-		print('Missing:')
+		warnings.warn(('Missing files'))
 		print(missing)
 	else:
 		print('Same number of raw and processed files')	
+
+def checkForBinary(command):
+	test = os.popen("which "+command).read()
+	if test != '':
+		print(command +' found at '+test)
+	else:
+		raise ValueError('binary for '+command +' not found')	
+
+
+def downloadCorpus(language, order, inputdir):
+	raise NotImplementedError
+
+def downloadCorpusWrapper(corpusSpecification):
+	downloadCorpus(corpusSpecification['language'], corpusSpecification['order'],corpusSpecification['inputdir'])
+
+def validateCorpus(corpusSpecification):	
+	
+
+
