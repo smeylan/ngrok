@@ -8,42 +8,44 @@ inputDir = "/shared_hd/corpora/"
 fastStorageDir = "/shared_ssd/ss/"
 slowStorageDir = "/shared_hd2/ss/" 
 
+import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings
+#os.chdir('/home/stephan/python/ngrok') #necessary if running from the REPL
 import ngrok
 #reload(ngrok)
 
-import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings
 
 print('Checking for dependencies...')
 dependencies = ['ngram','ngram-count','zs','gzrecover']
 [ngrok.checkForBinary(d) for d in dependencies]
 
 corporaToAnalyze = [
-{'corpus':'GoogleBooks2012',
-	'langauge':'eng',
-	'order':'3',
-	'analysisname': analysisName,
-	'inputdirectory':inputDir,
-	'faststoragedir': fastStorageDir,
-	'slowstoragedir': slowStorageDir},
+# {'corpus':'GoogleBooks2012',
+# 	'language':'eng',
+# 	'order':'3',
+# 	'analysisname': analysisName,
+# 	'inputdir':inputDir,
+# 	'faststoragedir': fastStorageDir,
+# 	'slowstoragedir': slowStorageDir,
+# 	'wordlist':'/shared_hd/corpora/OPUS/en_opus_wordlist.csv'}]
+# 	,
 {'corpus':'GoogleBooks2012',
 	'langauge':'spa',
 	'order':'3',
 	'analysisname': analysisName,
-	'inputDir':inputDir,
+	'inputdir':inputDir,
 	'faststoragedir': fastStorageDir,
 	'slowstoragedir': slowStorageDir},
-{'corpus': 'BNC',
-	'langauge':'eng',
-	'order':'3',
-	'inputdir':inputDir,
-	'analysisname': analysisName,
-	'faststoragedir': fastStorageDir,
-	'slowstoragedir': slowStorageDir}
-]
+	'wordlist': '/shared_hd/corpora/OPUS/es_opus_wordlist.csv']
+# {'corpus': 'BNC',
+# 	'langauge':'eng',
+# 	'order':'3',
+# 	'inputdir':inputDir,
+# 	'analysisname': analysisName,
+# 	'faststoragedir': fastStorageDir,
+# 	'slowstoragedir': slowStorageDir}
+# ]
 
 if __name__ == '__main__':
-    [ngrok.downloadCorpus(x) for x in corporaToAnalyze]	
-    
-    [ngrok.validateCorpus(x) for x in corporaToAnalyze]
-    
+    #[ngrok.downloadCorpus(x) for x in corporaToAnalyze]	    
+    #[ngrok.validateCorpus(x) for x in corporaToAnalyze]    
     [ngrok.analyzeCorpus(x) for x in corporaToAnalyze]
