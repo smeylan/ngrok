@@ -55,7 +55,7 @@ ngrok makelanguagemodel --inputfile  /shared_ssd/ss/sep2/GoogleBooks2012/Eng/00_
 ngrok marginalizengramfile --inputfile /shared_ssd/ss/sep2/GoogleBooks2012/Eng/00_lexicalSurprisal/2gram-forwards-collapsed.txt --n 1 --outputfile /shared_ssd/ss/sep2/GoogleBooks2012/Eng/00_lexicalSurprisal/unigram_list.txt --sorttype numeric
 
 # add word to the unigram list column name
-sed -i '1s/^/count\tword\n/' /shared_ssd/ss/sep2/GoogleBooks2012/Eng/00_lexicalSurprisal/unigram_list.txt
+sed -i '1s/^/count\\tword\\n/' test.txt /shared_ssd/ss/sep2/GoogleBooks2012/Eng/00_lexicalSurprisal/unigram_list.txt
 
 # get the sublexical surprisal estimates
 ngrok getsublexicalsurprisals --inputfile /shared_ssd/ss/sep2/GoogleBooks2012/Eng/00_lexicalSurprisal/unigram_list.txt --outputfile /shared_ssd/ss/sep2/GoogleBooks2012/Eng/01_sublexicalSurprisal/200000_sublex.csv --n 200000 --srilmpath /usr/share/srilm/bin/i686-m64/
