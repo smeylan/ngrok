@@ -27,9 +27,10 @@ def makeDirectoryStructure(faststoragedir, slowstoragedir, analysisname, corpus,
 @click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
 @click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)', required=True)
 @click.option('--collapseyears', type=bool, help='Collapse the counts over years?')
-def cleanGoogle(inputfile, outputfile, collapseyears):	
+@click.option('--filetype', type=str, help='Extension of the file that is to be cleaned')
+def cleanGoogle(inputfile, outputfile, collapseyears, filetype):	
 	'''Strip punctuation from google-formatted ngram files and retain only lines that are words alone (e.g. no POS tags)'''	
-	ngrok.cleanGoogle(inputfile, outputfile, collapseyears)
+	ngrok.cleanGoogle(inputfile, outputfile, collapseyears, filetype)
 
 #collapseNgrams
 @cli.command() 
@@ -180,10 +181,9 @@ def getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cuto
 @click.option('--inputfile', type=click.Path(), help="Filename of the input files. Must contain 'word' as a column name", required=True)
 @click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
 @click.option('--n', type=int, help="Number of types to use in the model. Input file must be ordered for this to make sense. -1 indicates use the entire 'word' column")
-@click.option('--srilmpath', type=click.Path(), help="Path for SRILM", required=True)
 def getSublexicalSurprisals(inputfile, outputfile, n, srilmpath):
 	'''get the probability of each word's letter sequence using the set of words in the language'''
-	ngrok.getSublexicalSurprisals(inputfile, outputfile, n, srilmpath)
+	ngrok.getSublexicalSurprisals(inputfile, outputfile, n)
 
 #analyzeSurprisalCorrelations
 @cli.command() 

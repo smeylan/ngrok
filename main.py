@@ -4,9 +4,9 @@
 #Top-level function. Specify the corpus, language, and order for all of the analyses
 
 analysisName = "16Sept2015"
-inputDir = "/shared_hd/corpora/" 
+inputDir = "/shared_hd0/corpora/" 
 fastStorageDir = "/shared_ssd/ss/"
-slowStorageDir = "/shared_hd2/ss/" 
+slowStorageDir = "/shared_hd1/ss/" 
 
 import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings
 #os.chdir('/home/stephan/python/ngrok') #necessary if running from the REPL
@@ -90,3 +90,17 @@ if __name__ == '__main__':
     #[ngrok.downloadCorpus(x) for x in corporaToAnalyze]	    
     #[ngrok.validateCorpus(x) for x in corporaToAnalyze]    
     [ngrok.analyzeCorpus(x) for x in corporaToAnalyze]
+
+
+
+#corpusSpecification = {'corpus':'GoogleBooks2012',
+# 	'language':'spa-all',
+# 	'order':'3',
+# 	'analysisname': analysisName,
+# 	'inputdir':inputDir,
+# 	'faststoragedir': fastStorageDir,
+# 	'slowstoragedir': slowStorageDir,
+# 	'wordlist': '/shared_hd/corpora/OPUS/es_opus_wordlist.csv'}
+
+
+# ngrok.validateCorpus(corpusSpecification)
