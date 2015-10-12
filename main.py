@@ -26,7 +26,7 @@ corporaToAnalyze = [
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist':'/shared_hd/corpora/OPUS/en_opus_wordlist.csv'}
+# 	'wordlist':'/shared_hd0/corpora/OPUS/2013_OPUS/en_2013.txt'}
 # 	,
 # {'corpus':'GoogleBooks2012',
 # 	'language':'spa',
@@ -35,7 +35,7 @@ corporaToAnalyze = [
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist': '/shared_hd/corpora/OPUS/es_opus_wordlist.csv'},
+# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/es_2013.txt'},
 # {'corpus':'GoogleBooks2012',
 # 	'language':'fre',
 # 	'order':'3',
@@ -43,7 +43,7 @@ corporaToAnalyze = [
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist': '/shared_hd/corpora/OPUS/fr_opus_wordlist.csv'},
+# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/fr_2013.txt'},
 # {'corpus':'GoogleBooks2012',
 # 	'language':'ger',
 # 	'order':'3',
@@ -51,15 +51,15 @@ corporaToAnalyze = [
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist': '/shared_hd/corpora/OPUS/de_opus_wordlist.csv'}
-# {'corpus':'GoogleBooks2012',
-# 	'language':'test',
+# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/de_2013.txt'}
+# {'corpus':'Google1T',
+# 	'language':'ENGLISH',
 # 	'order':'3',
 # 	'analysisname': analysisName,
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist': '/shared_hd/corpora/OPUS/fr_opus_wordlist.csv'}
+# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/en_2013.txt'}
 # {'corpus':'Google1T',
 # 	'language':'SPANISH',
 # 	'order':'3',
@@ -67,16 +67,16 @@ corporaToAnalyze = [
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist': '/shared_hd/corpora/OPUS/es_opus_wordlist.csv'},
+# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/es_2013.txt'}]
 {'corpus':'Google1T',
-	'language':'ENGLISH',
+	'language':'FRENCH',
 	'order':'3',
 	'analysisname': analysisName,
 	'inputdir':inputDir,
 	'faststoragedir': fastStorageDir,
 	'slowstoragedir': slowStorageDir,
-	'wordlist': '/shared_hd/corpora/OPUS/en_opus_wordlist.csv'}	
-]
+	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/fr_2013.txt'}]	
+# ]
 # {'corpus': 'BNC',
 # 	'language':'eng',
 # 	'order':'3',

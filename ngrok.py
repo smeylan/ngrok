@@ -1,9 +1,11 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings, codecs
+import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings, codecs, aspell
 from zs import ZS
 from scipy import stats
+import joblib, multiprocessing
+from joblib import delayed, Parallel
 
 #ngrok library
 #!!! make sure that the CLI commands are updated
@@ -18,7 +20,7 @@ class cgWorker(multiprocessing.Process):
     def run(self):    	
         for job in iter(self.queue.get, None): # Call until the sentinel None is returned
         	try:
-        		cleanGoogle(job['inputfile'], job['outputfile'], job['collapseyears'],job['filetype'])        
+        		cleanGoogle(job['inputfile'], job['outputfile'], job['collapseyears'],job['filetype'], job['order'])        
         	except ValueError:
         		print 'Problems encountered in cleaning '+job['inputfile']
 			self.myList.append(job['inputfile'])
@@ -35,7 +37,7 @@ class pgWorker(multiprocessing.Process):
         	processGoogle(job['inputfile'], job['outputfile'] , job['yearbin'], job['quiet'], job['n'], job['earliest'], job['latest'], job['reverse'], job['strippos'], job['lower'])	
         	self.myList.append(job['inputfile'])
 
-def cleanGoogleDirectory(inputdir, outputdir, collapseyears):
+def cleanGoogleDirectory(inputdir, outputdir, collapseyears, order):
 	'''Parallelized, load-balanced execution of cleanGoogle, starting with the largest files'''
 	start_time =  time.time()
 
@@ -70,7 +72,7 @@ def cleanGoogleDirectory(inputdir, outputdir, collapseyears):
 	
 	extension = '.yc' if collapseyears else '.output'
 	# Add data, in the form of a dictionary to the queue for our processeses to grab    
-	[q.put({"inputfile": file[0], "outputfile": os.path.join(outputdir, os.path.splitext(os.path.basename(file[0]))[0]+extension),"collapseyears": collapseyears, 'filetype':filetype}) for file in filesizes] 
+	[q.put({"inputfile": file[0], "outputfile": os.path.join(outputdir, os.path.splitext(os.path.basename(file[0]))[0]+extension),"collapseyears": collapseyears, 'filetype':filetype, 'order':order}) for file in filesizes] 
       
 	#append none to kill the workers with poison pills		
 	for i in range(12):
@@ -127,9 +129,9 @@ def processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, earliest, lat
 def collapseNgrams(inputfile, outputfile):
 	'''aggregate across dates from a google-formatted ngram file'''
 	bufsize = 10000000
-	print('Collapsing years...')
-	iff = open(inputfile, 'r')
-	off = open(outputfile, 'w')	
+	print('Collapsing years...')	
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')
+	off = codecs.open(outputfile, 'w', encoding='utf-8')		
 	firstLine ='\n' #handle any lines that are blank at the beginning of the text
 	#need to confirm that there is anything in the file
 	while firstLine == '\n' or firstLine == '':
@@ -187,27 +189,33 @@ def collapseNgrams(inputfile, outputfile):
 	off.close()
 	print('Finished collapsing years, output in file '+str(outputfile))
 
-def cleanGoogle(inputfile, outputfile, collapseyears, filetype):
-	'''Clean google trigram file. This is a highly streamlined version of process google that finds only non POS-tagged lines, with no punctuation, and makes them lowercase, using grep to find lines without punctuation (including _, which excludes lines with POS tags) and perl to lowercase the string, while maintaining the unicode encoding. If collapseyears is true, combine the year counts into a single record'''	
-	if collapseyears:
-		tempfile = inputfile+'_temp'
+def cleanGoogle(inputfile, outputfile, collapseyears, filetype, order):
+	'''Clean google trigram file. This is a highly streamlined version of process google that finds only non POS-tagged lines, with no punctuation, and makes them lowercase, using grep to find lines without punctuation (including _, which excludes lines with POS tags) and perl to lowercase the string, while maintaining the unicode encoding. If collapseyears is true, combine the year counts into a single record'''
+	tempfile0 = inputfile+'_temp0'
+	if collapseyears:		
+		tempfile1 = inputfile+'_temp1'
+		
 		if filetype == 'gz':
-			cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[[:punct:]]' | perl -CSD -ne 'print lc' > "+tempfile
+			cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile1
 		elif filetype == 'bz2':
-			cleanGoogleCommand = "bzcat "+inputfile+" | LC_ALL=C grep -v '[[:punct:]]' | perl -CSD -ne 'print lc' > "+tempfile	
+			cleanGoogleCommand = "bzcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile1	
 		os.system(cleanGoogleCommand)
-		if os.stat(tempfile).st_size > 0 :	
-			collapseNgrams(tempfile, outputfile) # this means that there are separate records for lowercase and uppercase items
+		if os.stat(tempfile1).st_size > 0 :	
+			collapseNgrams(tempfile1, tempfile0) # this means that there are separate records for lowercase and uppercase items
 		else:
+			return(None)
 			'Temp file has no content; safe to remove.'	
-		os.remove(tempfile)
+		os.remove(tempfile1)
 	else:	
 		if filetype == 'gz':
-			cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[[:punct:]]' | perl -CSD -ne 'print lc' > "+outputfile
+			cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile0
 		elif filetype == 'bz2':
-			cleanGoogleCommand = "bzcat "+inputfile+" | LC_ALL=C grep -v '[[:punct:]]' | perl -CSD -ne 'print lc' > "+outputfile
+			cleanGoogleCommand = "bzcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile0
 		os.system(cleanGoogleCommand)
 
+	fixPunctuation(tempfile0, outputfile, order)	#remove the punctuation
+	os.remove(tempfile0)
+	return(outputfile)
 
 def processGoogle(inputfile, outputfile, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
 	'''Cleans the raw ngram counts from the Google download site, removing POS, capitalization, and reversing the order of the ngram as necessary. Backwards compatible with process-google.py from ngrampy. '''
@@ -400,8 +408,8 @@ def makeLanguageModel(inputfile, outputfile, metadata, codec):
 def reverseGoogleFile(inputfile, outputfile):
 	'''Reverse the order of the ngram in a Google-formatted ngram file. Note that this is a different procedure than rearranging the ngram files that are output by AutoCorpus'''
 	print('Reversing existing model')		
-	iff = open(inputfile, 'r')
-	off = open(outputfile, 'w')
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')
+	off = codecs.open(outputfile, 'w', encoding='utf-8')		
 	for l in iff:
 		strArray = l.split('\t')		
 		if len(strArray) > 0: #this cleans any empty lines that are produced by the cleaning process
@@ -481,7 +489,7 @@ def getGoogleBooksLanguageModel(corpusSpecification, n, reverse, collapseyears, 
 	}
 	print zs_metadata
 	
-	print('Checking if there are appropriate cleaned text files to create lower-order language model...')
+	print('Checking if there are appropriate cleaned text files to create lower-order language model...')	
 	tryHigher = deriveFromHigherOrderModel(intermediateFileDir, n, direction)	
 	
 	if tryHigher is not None:
@@ -498,14 +506,14 @@ def getGoogleBooksLanguageModel(corpusSpecification, n, reverse, collapseyears, 
 		if collapseyears:
 			cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.yc')	
 			if cleanFileProp < .2:
-				cleanGoogleDirectory(inputdir,outputdir, collapseyears)
+				cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
 				checkForMissingFiles(inputdir, '*.'+ filetype, outputdir, '*.yc')	
 			combineFiles(outputdir, '*.yc', combinedfile)	
 
 		else:	
 			cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
 			if cleanFileProp < .2:
-				cleanGoogleDirectory(inputdir,outputdir, collapseyears)
+				cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
 				checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
 			combineFiles(outputdir, '*.output', combinedfile)		
 
@@ -586,7 +594,7 @@ def analyzeCorpus(corpusSpecification):
 		else:
 			raise NotImplementedError		
 	elif(corpus == 'Google1T'):
-		if (language in ('SPANISH','ENGLISH')):
+		if (language in ('SPANISH','ENGLISH','FRENCH')):
 			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='bz2')
 			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='bz2')
 	elif(corpus == 'BNC'):
@@ -610,7 +618,7 @@ def analyzeCorpus(corpusSpecification):
 	
 	#build the unigram count list		
 	forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
-	unigramCountFilePath = os.path.join(lexSurpDir, 'unigram_list.txt')
+	unigramCountFilePath = corpusSpecification['wordlist']
 	marginalizeNgramFile(forwardBigramPath, unigramCountFilePath, 1, 'numeric') 	
 	
 	print('Getting mean lexical surprisal estimates for types in the langauge...')
@@ -622,8 +630,8 @@ def analyzeCorpus(corpusSpecification):
 	#take the top 25k words? or OPUS for each language?    
 
 
-	print('Getting sublexical surprisal estimates for types in the language...')
-	numberOfTypesInModel = 200000
+	print('Getting sublexical surprisal estimates for types in the language...')	
+	numberOfTypesInModel = 25000
 	sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sublex.csv')
 	getSublexicalSurprisals(unigramCountFilePath, sublexFilePath, numberOfTypesInModel)
 	
@@ -669,8 +677,8 @@ def getPlaintextLanguageModel(corpusSpecification, n, reverse, cleaningFunction)
 
 def rearrangeNgramFile(inputfile, outputfile, reverse):
 	print('Rearranging the ngrams...')
-	iff = open(inputfile, 'r')
-	off = open(outputfile, 'w')
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')
+	off = codecs.open(outputfile, 'w', encoding='utf-8')	
 	for l in iff:		
 		l = l.replace('\n','').replace(' ','\t')
 		strArray = l.split('\t')
@@ -694,10 +702,12 @@ def marginalizeNgramFile(inputfile, outputfile, n, sorttype):
 	#this method is lossy-- not all bigrams present in the dataset will be here--but the counts are consistent with the higher order ngram file.	
 	#!!! marginalizer needs to handle tab and space separated input	
 	#!!! combining context counts doesn't take into account that the same contexts might be used in both cases
-	iff = open(inputfile, 'r')
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')
+	
 	tf_path = os.path.join(os.path.dirname(inputfile),next(tempfile._get_candidate_names()))
 	tf = open(tf_path, 'w')
-		
+	tf = codecs.open(tf_path, 'w', encoding='utf-8')	
+
 	firstLine ='\n' #handle any lines that are blank at the beginning of the text
 	while firstLine == '\n':
 		firstLine = iff.readline()
@@ -740,11 +750,15 @@ def marginalizeNgramFile(inputfile, outputfile, n, sorttype):
 			if ncols == 3:
 				cachedContextCount += contextCount
 			#print('Increased '+cachedNgram+' count to : '+str(cachedCount))
-	#obligate write of final cached value at the end                
-	if ncols == 3:	
-		tf.write(cachedNgram+'\t'+str(cachedCount)+'\t'+str(cachedContextCount)+'\n')
-	elif ncols == 2:
-		tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')	
+	#obligate write of final cached value at the end 
+	if sorttype == 'alphabetic':               
+		if ncols == 3:	
+			tf.write(cachedNgram+'\t'+str(cachedCount)+'\t'+str(cachedContextCount)+'\n')
+		elif ncols == 2:
+			tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')	
+	else:
+		tf.write(str(cachedCount)+'\t'+cachedNgram+'\n')		
+
 	iff.close()
 	tf.close()
 
@@ -775,8 +789,8 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 		return remove_punctuation(l.lower().decode('utf-8')).encode('utf-8')
 	cleanLineOptions = {'cleanLine_BNC': cleanLine_BNC}
 
-	iff = open(inputfile, 'r')
-	off = open(outputfile,'w')
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')
+	off = codecs.open(outputfile, 'w', encoding='utf-8')	
 
 	for line in iff:		
 		off.write(cleanLineOptions['cleaningFunction'](line))
@@ -786,7 +800,7 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 
 
 
-def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wordlist_csv, cutoff, outputfile):	
+def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wordlist_csv, cutoff, outputfile):		
 	start_time = time.time()
 	'''producing mean surprisal estimates given a backwards n-gram language model and a forwards text file (to be read into a hash table) for order n-1. Produces mean information content (mean log probability, weighted by the frequency of each context) as well as sublexical surprisal using Kneser-Ney smoothing on a list of words from an externally-provided wordlist (e.g. top 25k most frequent words in the corpus that are also in OPUS or Switchboard).'''
 	
@@ -805,19 +819,16 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wor
 			bigrams[key] = val
 		else:
 			pdb.set_trace()
-
+	pdb.set_trace()		
 	print('Loading unigram file...')		
 	uni_sorted_file = pandas.read_table(unigram_txt_path, encoding='utf-8')
-	top_words = uni_sorted_file['word']
+	top_words = uni_sorted_file['word']	
 
-	print('Loading OPUS file...')	
-	def hasNumbers(inputString):
-		return any(char.isdigit() for char in inputString)
-	
-	wordlist_DF = pandas.read_csv(wordlist_csv, encoding='utf-8')
+	print('Loading OPUS file...')		
+	wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8', keep_default_na=False, na_values=[])
 	wordlist = wordlist_DF['word'].tolist()
 	
-	frequent_words = [w for w in top_words[0:30000] if w in wordlist][:25000]	
+	frequent_words = [w for w in top_words[0:200000] if w in wordlist][:25000]	
 	print('Retrieving lexical surprisal estimates...')
 	surprisalEstimates = [get_mean_surp(bigrams, backward_zs, w, cutoff) for w in frequent_words]
 
@@ -829,12 +840,11 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wor
 def getSublexicalSurprisals(inputfile, outputfile, n):
 	'''get the probability of each word's letter sequence using the set of words in the language''' 	
 	print('Retrieving sublexical surprisal estimates...')
+		
 	df = pandas.read_table(inputfile)
 	if n != -1:
 		df = df.iloc[0:min(n,len(df)-1)]		
-
-	LM = trainSublexicalSurprisalModel(df['word'].astype('str'), order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)
-	#!!! there is something hard coded about the temp file creation that is crashing the process
+	LM = trainSublexicalSurprisalModel(df, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)	
 	df['ss']   = [getSublexicalSurprisal(word, LM, 5, 'letters', returnSum=True) for word in list(df['word'])]
 	df.to_csv(outputfile, index=False, encoding='utf-8')
 	print('Done!')
@@ -874,7 +884,7 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 	return (word, st, uwst, total_freq, num_context, (stop_time-start_time))
 
 
-def trainSublexicalSurprisalModel(wordList, order, smoothing, smoothOrder, interpolate):	
+def trainSublexicalSurprisalModel(wordlist_DF, order, smoothing, smoothOrder, interpolate):	
 	''' Train an n-gram language model using a list of types 
 
 		wordList: array or list of types in the language
@@ -887,7 +897,6 @@ def trainSublexicalSurprisalModel(wordList, order, smoothing, smoothOrder, inter
 
 	# ensure that ngram-count is on the path. shouldn't need to do this from the command line	
 	#os.environ['PATH'] = os.environ['PATH']+':'+srilmPath
-	
 	#generate the relevant filenames
 	timestr = str(time.strftime("%Y%m%d-%H%M%S"))
 	if not os.path.exists('temp/'): #!!! we probably shouldn't write to temp in this way
@@ -897,8 +906,8 @@ def trainSublexicalSurprisalModel(wordList, order, smoothing, smoothOrder, inter
 	modelFile = basePath + smoothing + '.LM'
 
 	# write the type inventory to the outfile
-	outfile = open(typeFile, 'w')
-	sentences=[' '.join(list(word)) for word in wordList]
+	outfile = codecs.open(typeFile, 'w','utf-8')	
+	sentences=[' '.join(list(word.decode('utf-8'))) for word in wordlist_DF['word'].astype('unicode')] #this line handles the UTF-8 output properly
 	print >> outfile, '\n'.join(sentences)
 	outfile.close()
 
@@ -958,7 +967,7 @@ def analyzeSurprisalCorrelations(lexfile, sublexfile, wordlist_csv, outfile):
 	'''get correlations and plot the relationship between lexical and sublexical surprisal'''
 	lex_DF = pandas.read_csv(lexfile, encoding='utf-8')
 	sublex_DF = pandas.read_csv(sublexfile, encoding='utf-8')
-	wordlist_DF = pandas.read_csv(wordlist_csv, encoding='utf-8').drop_duplicates('word')	
+	wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8')	
 
 	df = lex_DF.merge(sublex_DF, on='word').sort('frequency', ascending=False)	
 
@@ -1093,3 +1102,106 @@ def validateCorpus(corpusSpecification):
 					#gzrecover #
 				sys.stdout.flush()
 	os.chdir(old_cwd)
+
+def cleanString(string): 
+		return(''.join(e for e in string if e.isalpha() or e in ("'") or e.isspace()))	
+
+def cleanUnigramCountFile(inputfile, outputfile, n, language):	
+	'''filter the unigram count file, and reduce the number of items in it'''	
+	df = pandas.read_table(inputfile, encoding='utf-8')
+	print("{:,} types".format(len(df)))
+	print("{:,} tokens".format(sum(df['count'])))
+	
+	#take some multiple of items to run the filters on
+	
+	#discard purely numeric items
+	df_nonnumeric = df[[type(x) is unicode for x in df['word']]]
+
+	#retain only lower-case items
+	df_lower = df_nonnumeric[[x == x.lower() for x in df_nonnumeric['word']]]
+	
+	#discard the <s> string
+	df_clean = df_lower[[x != u'</s>' for x in df_lower['word']]]
+
+	#delete apostrophes, numbers
+	df_clean['word'] = [re.sub(u"’|'|\d",'',x) for x in df_clean['word']]
+
+	#check for any empty strings
+	df_clean = df_clean[[x != '' and x is not  None for x in df_clean['word']]]		
+	
+	df_clean['word'] = [cleanString(x) for x in df_clean['word']] 
+
+	speller = aspell.Speller(('lang',language),('encoding','utf-8'))
+	df_clean['aspell'] = [speller.check(x.encode('utf-8')) == 1 for x in df_clean['word']]
+
+	#check the rejected words
+	#df_clean.ix[~df_clean['aspell']]	
+	to_write = df_clean.ix[df_clean['aspell']]
+	to_write = to_write.drop('aspell', axis=1)
+	to_write.to_csv(outputfile, sep='\t', index=False, encoding='utf-8')
+	print('Wrote to file: '+outputfile)
+
+
+def fixPunctuation(inputfile, outputfile, order):
+	'''remove symbols except apostrophes and replace right quotation mark with apostrophe'''
+	bufsize = 10000000
+	print('Fixing the punctuation...')
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')
+	off = codecs.open(outputfile, 'w', encoding='utf-8')	
+	firstLine ='\n' #handle any lines that are blank at the beginning of the text
+	#need to confirm that there is anything in the file
+	while firstLine == '\n' or firstLine == '':
+		firstLine = iff.readline()
+	
+	rows =[]
+	lineSplit = firstLine.split('\t')
+	ngram = lineSplit[0]	
+	ngram_split = [x for x in ngram.split(' ') if x != u"'" and x != u'']
+	count = int(lineSplit[1])
+	
+	if len(lineSplit) == 3:		
+		print('3 tab-delineated columns, assuming first is the ngram, second is the token and the third the context count')								
+		ncols = 3	
+		context_count = int(lineSplit[2])
+		if len(ngram_split) == order:
+			rows.append('\t'.join([ngram, str(count), str(context_count)]))	
+	elif len(lineSplit) == 2:
+		print('2 tab-delineated columns, assuming first is the ngram, second is the token count')	
+		ncols = 2		
+		if len(ngram_split) == order:
+			rows.append('\t'.join([ngram, str(count)]))	
+	
+	for c,l in enumerate(iff):
+		line = l.split('\t')
+		if len(line) != ncols:			
+			print 'Mismatch in line length and ncols, line was '+line
+			break
+		ngram = line[0]
+		ngram_split = [x for x in ngram.split(' ') if x != u"'" and x != u'']
+		if len(ngram_split) != order:
+			continue
+		count = int(line[1])
+		if ncols == 3: 
+			context_count = int(line[2])
+		
+		#fix the ngram
+		ngram = ngram.replace(u'’',u"'")
+		ngram = ''.join(e for e in ngram if e.isalpha() or e in (u"'") or e.isspace())
+		
+		ngram_split = [x for x in ngram.split(' ') if x != u"'" and x != u'']
+		if len(ngram_split) != order:
+			continue #there aren't N items after cleaning; exclude from the output
+
+		if ncols == 3:
+			rows.append('\t'.join([ngram, str(count), str(context_count)]))
+		elif ncols == 2:	
+			rows.append('\t'.join([ngram, str(count)]))
+			
+		if c % bufsize == 0:#refresh the buffer	
+			off.write('\n'.join(rows)+'\n')
+			rows =[] 
+		
+	off.write('\n'.join(rows)+'\n')	#catch any records since the last buffered write						 	
+	iff.close()
+	off.close()
+	print('Finished fixing the punctuation, output in file '+str(outputfile))

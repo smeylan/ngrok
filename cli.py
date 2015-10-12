@@ -28,9 +28,10 @@ def makeDirectoryStructure(faststoragedir, slowstoragedir, analysisname, corpus,
 @click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)', required=True)
 @click.option('--collapseyears', type=bool, help='Collapse the counts over years?')
 @click.option('--filetype', type=str, help='Extension of the file that is to be cleaned')
-def cleanGoogle(inputfile, outputfile, collapseyears, filetype):	
+@click.option('--order', type=int, help="order of ngrams to download", required=True)
+def cleanGoogle(inputfile, outputfile, collapseyears, filetype, order):	
 	'''Strip punctuation from google-formatted ngram files and retain only lines that are words alone (e.g. no POS tags)'''	
-	ngrok.cleanGoogle(inputfile, outputfile, collapseyears, filetype)
+	ngrok.cleanGoogle(inputfile, outputfile, collapseyears, filetype, order)
 
 #collapseNgrams
 @cli.command() 
@@ -78,6 +79,7 @@ def processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, latest, earli
 @click.option('--inputdir', type=click.Path(exists=True), help='The directory with the input', required=True)
 @click.option('--outputdir', type=click.Path(), help='The directory where the processed files should be output', required=True)
 @click.option('--collapseyears', type=bool, help='Collapse the counts over years?', required=True)
+@click.option('--order', type=int, help="order of ngrams to download", required=True)
 def cleanGoogleDirectory(inputdir, outputdir, collapseyears):	
 	'''Parallelized application of processGoogle'''	
 	ngrok.cleanGoogleDirectory(inputdir, outputdir, collapseyears)
@@ -212,6 +214,23 @@ def checkForMissingFiles(directory1, pattern1, directory2, pattern2):
 @click.option('--inputdir', type=click.Path(), help="path of where to write the downloaded ngram files")
 def downloadCorpus(language, order, inputdir):
 	ngrok.downloadCorpus(language, order, inputdir)
+
+#cleanUnigramCountFile
+@cli.command() 
+@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
+@click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)', required=True)
+@click.option('--n', type=int, help='The top n words to retain', required=True)
+def cleanUnigramCountFile(inputfile, outputfile, n):
+	'''Filter the unigram count file, and reduce the number of items in it.'''
+	ngrok.cleanUnigramCountFile(inputfile, outputfile, n)
+
+#fixPunctuation
+@cli.command() 
+@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
+@click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)', required=True)
+@click.option('--order', type=int, help="order of ngrams to download", required=True)
+def fixPunctuation(inputfile, outputfile, order):	
+	ngrok.fixPunctuation(inputfile, outputfile, order)
 
 if __name__ == '__main__':
     cli()
