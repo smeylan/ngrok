@@ -59,7 +59,8 @@ corporaToAnalyze = [
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/en_2013.txt'}
+# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/en_2013.txt',
+# 	'country_code': 'en'}]
 # {'corpus':'Google1T',
 # 	'language':'SPANISH',
 # 	'order':'3',
@@ -75,7 +76,8 @@ corporaToAnalyze = [
 	'inputdir':inputDir,
 	'faststoragedir': fastStorageDir,
 	'slowstoragedir': slowStorageDir,
-	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/fr_2013.txt'}]	
+	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/fr_2013.txt',
+	'country_code': 'fr'}]	
 # ]
 # {'corpus': 'BNC',
 # 	'language':'eng',

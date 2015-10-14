@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings, codecs, aspell
+import os, subprocess, re, sys, itertools, codecs, gzip, glob, unicodedata, click, pandas, srilm, pdb, json, multiprocessing, time, tempfile, math, scipy, warnings, codecs, aspell, unidecode, espeak
 from zs import ZS
 from scipy import stats
 import joblib, multiprocessing
@@ -633,7 +633,7 @@ def analyzeCorpus(corpusSpecification):
 	print('Getting sublexical surprisal estimates for types in the language...')	
 	numberOfTypesInModel = 25000
 	sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sublex.csv')
-	getSublexicalSurprisals(unigramCountFilePath, sublexFilePath, numberOfTypesInModel)
+	getSublexicalSurprisals(unigramCountFilePath, sublexFilePath, numberOfTypesInModel, corpusSpecification['country_code'])
 	
 	#this should produce the sublex
 	outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_200ksublex.csv')
@@ -819,7 +819,7 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wor
 			bigrams[key] = val
 		else:
 			pdb.set_trace()
-	pdb.set_trace()		
+
 	print('Loading unigram file...')		
 	uni_sorted_file = pandas.read_table(unigram_txt_path, encoding='utf-8')
 	top_words = uni_sorted_file['word']	
@@ -836,18 +836,6 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wor
 	df.columns = ['word','mean_surprisal_weighted','mean_surprisal_unweighted','frequency','numContexts','retrievalTime']
 	df.to_csv(outputfile, index=False, encoding='utf-8')	
 	print('Done! Completed file is at '+outputfile+'; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 
-
-def getSublexicalSurprisals(inputfile, outputfile, n):
-	'''get the probability of each word's letter sequence using the set of words in the language''' 	
-	print('Retrieving sublexical surprisal estimates...')
-		
-	df = pandas.read_table(inputfile)
-	if n != -1:
-		df = df.iloc[0:min(n,len(df)-1)]		
-	LM = trainSublexicalSurprisalModel(df, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)	
-	df['ss']   = [getSublexicalSurprisal(word, LM, 5, 'letters', returnSum=True) for word in list(df['word'])]
-	df.to_csv(outputfile, index=False, encoding='utf-8')
-	print('Done!')
 
 def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):	
 	start_time = time.time()	
@@ -883,6 +871,33 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 	uwst = None if num_context == 0 else unweightedSurprisal / float(num_context)
 	return (word, st, uwst, total_freq, num_context, (stop_time-start_time))
 
+def getSublexicalSurprisals(inputfile, outputfile, n, language):
+	'''get the probability of each word's letter sequence using the set of words in the language''' 	
+	print('Retrieving sublexical surprisal estimates...')
+	
+	
+	df = pandas.read_table(inputfile, encoding='utf-8').dropna()
+	if n != -1:
+		df = df.iloc[0:min(n*1.2,len(df)-1)]		
+
+	#!!! fr is hard coded here	
+	pdb.set_trace()
+	pronunciations = [espeak.espeak(language,x) for x in df['word']]		
+	
+	pdf = pandas.DataFrame(pronunciations)	#!!! should this encoding step be explicitly utf-8
+	pm = df.merge(pdf, left_on="word", right_on="original_unicode")
+	
+	#exclude items where pronunctiation is longer than the number of characters 
+	pm['suspect'] = pm.apply(lambda x: (x['length_unidecode']/2.) > len(x['word']), axis=1)
+	pm = pm.ix[~pm['suspect']][0:n]
+
+	LM = trainSublexicalSurprisalModel(pm, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)	
+	pm['ss_arrays']   = [getSublexicalSurprisal(word, LM, 5, 'letters', returnSum=False) for word in list(pm['word'])]
+	pm['ss'] = [sum(x) if x is not None else 0 for x in pm['ss_arrays']]	
+
+	pm.to_csv(outputfile, index=False, encoding='utf-8')
+	print('Done!')
+
 
 def trainSublexicalSurprisalModel(wordlist_DF, order, smoothing, smoothOrder, interpolate):	
 	''' Train an n-gram language model using a list of types 
@@ -906,8 +921,8 @@ def trainSublexicalSurprisalModel(wordlist_DF, order, smoothing, smoothOrder, in
 	modelFile = basePath + smoothing + '.LM'
 
 	# write the type inventory to the outfile
-	outfile = codecs.open(typeFile, 'w','utf-8')	
-	sentences=[' '.join(list(word.decode('utf-8'))) for word in wordlist_DF['word'].astype('unicode')] #this line handles the UTF-8 output properly
+	outfile = codecs.open(typeFile, 'w',encoding='utf-8')
+	sentences=[u' '.join(list(word.replace(u"'",u''))) for word in wordlist_DF['word']] #this line handles the UTF-8 output properly
 	print >> outfile, '\n'.join(sentences)
 	outfile.close()
 
@@ -931,27 +946,31 @@ def getSublexicalSurprisal(targetWord, model, order, method, returnSum):
 		returnSum: if true, return sum of surprisal values
 				otherwise, return a list of surprisal values		
 	'''
-
-	if (method == 'sounds'):
+	print  'Getting sublexical surprisal: '+targetWord	
+	if (method == 'sounds'):		
 		#throw an error if the variable word is not already a list
-		word = targetWord + ['</s>']
-		infoContent = list()		
-	elif (method == 'letters'):
-		word = re.sub('[0123456789\\-\\.\\,\\=]', '',str(targetWord))			
-		if(len(word) == 0):
+		word = targetWord + ['</s>'] #append an end symbol
+		infoContent = list()	
+		raise NotImplementedError	
+	elif (method == 'letters'):		
+		# if type(targetWord) is not str:
+		# 	pdb.set_trace()		
+
+		if(len(targetWord) == 0):
 			return(None)
 			#proceed to the next one
 		else:
-			word = list(word) + ['</s>']
+			word = [x for x in targetWord] + ['</s>']
+			#!!! how does this handle multibye characters like ã?
 			infoContent = list()
-	
+
 	for phoneIndex in range(len(word)):
 		if(phoneIndex - order < 0):
 			i = 0 #always want the start to be positive 
 		else:
 			i = phoneIndex - order + 1 					
-		target=word[phoneIndex] 				 		
-		preceding=word[i:phoneIndex][::-1] #pySRILM wants the text in reverse 		
+		target=word[phoneIndex].encode('utf-8') 				 		
+		preceding=[x.encode('utf-8') for x in word[i:phoneIndex][::-1]] #pySRILM wants the text in reverse 		
 		phonProb = model.logprob_strings(target,preceding)
 		#print('Target: '+target,': preceding: '+' '.join(preceding)+'; prob:'+num2str(10**phonProb,5))
 		infoContent.append(-1*phonProb)								
@@ -972,7 +991,7 @@ def analyzeSurprisalCorrelations(lexfile, sublexfile, wordlist_csv, outfile):
 	df = lex_DF.merge(sublex_DF, on='word').sort('frequency', ascending=False)	
 
 	df_selected = wordlist_DF.merge(df, on='word').sort('frequency', ascending=False).dropna()
-	df_selected['nchar'] = [len(x) for x in df_selected['word']]	
+	df_selected['nchar'] = [len(unidecode.unidecode(x.replace("'",''))) for x in df_selected['word']]	
 	
 	ssCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['ss'])
 	ncharCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['nchar'])
