@@ -619,7 +619,7 @@ def analyzeCorpus(corpusSpecification):
 	#build the unigram count list		
 	forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
 	unigramCountFilePath = corpusSpecification['wordlist']
-	marginalizeNgramFile(forwardBigramPath, unigramCountFilePath, 1, 'numeric') 	
+	#marginalizeNgramFile(forwardBigramPath, unigramCountFilePath, 1, 'numeric') 	
 	
 	print('Getting mean lexical surprisal estimates for types in the langauge...')
 	forwardsNminus1txt = os.path.join(lexSurpDir,str(int(n)-1)+'gram-forwards-collapsed.txt')
