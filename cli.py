@@ -183,9 +183,10 @@ def getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cuto
 @click.option('--inputfile', type=click.Path(), help="Filename of the input files. Must contain 'word' as a column name", required=True)
 @click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
 @click.option('--n', type=int, help="Number of types to use in the model. Input file must be ordered for this to make sense. -1 indicates use the entire 'word' column")
-def getSublexicalSurprisals(inputfile, outputfile, n):
+@click.option('--language', type=str, help="2-letter language code", required=True)
+def getSublexicalSurprisals(inputfile, outputfile, n, language):
 	'''get the probability of each word's letter sequence using the set of words in the language'''
-	ngrok.getSublexicalSurprisals(inputfile, outputfile, n)
+	ngrok.getSublexicalSurprisals(inputfile, outputfile, n, language)
 
 #analyzeSurprisalCorrelations
 @cli.command() 

@@ -594,7 +594,7 @@ def analyzeCorpus(corpusSpecification):
 		else:
 			raise NotImplementedError		
 	elif(corpus == 'Google1T'):
-		if (language in ('SPANISH','ENGLISH','FRENCH')):
+		if (language in ('SPANISH','ENGLISH','FRENCH','DUTCH','GERMAN')):
 			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='bz2')
 			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='bz2')
 	elif(corpus == 'BNC'):
@@ -616,11 +616,15 @@ def analyzeCorpus(corpusSpecification):
 		else:
 			raise NotImplementedError	
 	
-	#build the unigram count list		
-	forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
-	unigramCountFilePath = corpusSpecification['wordlist']
+	#to use most frequent words from Google for the sublexical surprisal model
+	#forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
+	#unigramCountFilePath = corpusSpecification['wordlist'] -- if this were included with marginalization, we would overwrite the OPUS file	 (not good!)
+	#unigramCountFilePath = os.path.join(lexSurpDir, 'unigram_list.txt')
 	#marginalizeNgramFile(forwardBigramPath, unigramCountFilePath, 1, 'numeric') 	
-	
+
+	#to use OPUS for the sublexical surprisal model:
+	unigramCountFilePath = corpusSpecification['wordlist']	
+
 	print('Getting mean lexical surprisal estimates for types in the langauge...')
 	forwardsNminus1txt = os.path.join(lexSurpDir,str(int(n)-1)+'gram-forwards-collapsed.txt')
 
@@ -766,8 +770,11 @@ def marginalizeNgramFile(inputfile, outputfile, n, sorttype):
 	#then run sort on the output file
 	if (sorttype == 'numeric'):
 		os.system("sort -n -r "+tf_path+' > '+outputfile) # sorted by descending frequency
-		addCommand = "sed -i '1s/^/count\\tword\\n/' " # add labels, do this post hoc so we can sort the file
+		addCommand = "sed -i '1s/^/count\\tword\\n/' " # add labels, do this post hoc so we can sort the file		
 		os.system(addCommand + outputfile)
+		##df = pandas.read_table(outputfile, sep='\t', encoding='utf-8')
+		#df.to_csv(outputfile, encoding='utf-8') #overwrite the file
+
 	elif (sorttype == 'alphabetic'):
 		os.system("env LC_ALL=C sort "+tf_path+' > '+outputfile) # sorted alphabetically, suitable for putting into a ZS file         
 	os.remove(tf_path)	
@@ -875,24 +882,22 @@ def getSublexicalSurprisals(inputfile, outputfile, n, language):
 	'''get the probability of each word's letter sequence using the set of words in the language''' 	
 	print('Retrieving sublexical surprisal estimates...')
 	
-	
 	df = pandas.read_table(inputfile, encoding='utf-8').dropna()
 	if n != -1:
 		df = df.iloc[0:min(n*1.2,len(df)-1)]		
 
-	#!!! fr is hard coded here	
-	pdb.set_trace()
 	pronunciations = [espeak.espeak(language,x) for x in df['word']]		
-	
+	#as written this tesricts to items with reasonable pronunciations in the language
+
 	pdf = pandas.DataFrame(pronunciations)	#!!! should this encoding step be explicitly utf-8
-	pm = df.merge(pdf, left_on="word", right_on="original_unicode")
+	pm = df.merge(pdf, left_on="word", right_on="word")
 	
-	#exclude items where pronunctiation is longer than the number of characters 
-	pm['suspect'] = pm.apply(lambda x: (x['length_unidecode']/2.) > len(x['word']), axis=1)
+	#exclude items where pronunctiation is more than twice as long as the number of characters. This filters out many abbreviations  
+	pm['suspect'] = pm.apply(lambda x: (x['nSounds']/2.) > len(x['word']), axis=1)
 	pm = pm.ix[~pm['suspect']][0:n]
 
 	LM = trainSublexicalSurprisalModel(pm, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)	
-	pm['ss_arrays']   = [getSublexicalSurprisal(word, LM, 5, 'letters', returnSum=False) for word in list(pm['word'])]
+	pm['ss_arrays']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm['transcription'])]
 	pm['ss'] = [sum(x) if x is not None else 0 for x in pm['ss_arrays']]	
 
 	pm.to_csv(outputfile, index=False, encoding='utf-8')
@@ -922,7 +927,7 @@ def trainSublexicalSurprisalModel(wordlist_DF, order, smoothing, smoothOrder, in
 
 	# write the type inventory to the outfile
 	outfile = codecs.open(typeFile, 'w',encoding='utf-8')
-	sentences=[u' '.join(list(word.replace(u"'",u''))) for word in wordlist_DF['word']] #this line handles the UTF-8 output properly
+	sentences=[u' '.join(transcription) for transcription in wordlist_DF['transcription']] 
 	print >> outfile, '\n'.join(sentences)
 	outfile.close()
 
@@ -946,7 +951,7 @@ def getSublexicalSurprisal(targetWord, model, order, method, returnSum):
 		returnSum: if true, return sum of surprisal values
 				otherwise, return a list of surprisal values		
 	'''
-	print  'Getting sublexical surprisal: '+targetWord	
+	print  'Getting sublexical surprisal: '+''.join(targetWord).encode('utf-8')	
 	if (method == 'sounds'):		
 		#throw an error if the variable word is not already a list
 		word = targetWord + ['</s>'] #append an end symbol
@@ -960,8 +965,7 @@ def getSublexicalSurprisal(targetWord, model, order, method, returnSum):
 			return(None)
 			#proceed to the next one
 		else:
-			word = [x for x in targetWord] + ['</s>']
-			#!!! how does this handle multibye characters like ã?
+			word = targetWord + ['</s>'] 
 			infoContent = list()
 
 	for phoneIndex in range(len(word)):
@@ -991,14 +995,14 @@ def analyzeSurprisalCorrelations(lexfile, sublexfile, wordlist_csv, outfile):
 	df = lex_DF.merge(sublex_DF, on='word').sort('frequency', ascending=False)	
 
 	df_selected = wordlist_DF.merge(df, on='word').sort('frequency', ascending=False).dropna()
-	df_selected['nchar'] = [len(unidecode.unidecode(x.replace("'",''))) for x in df_selected['word']]	
+	
 	
 	ssCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['ss'])
-	ncharCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['nchar'])
+	nSoundsCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['nSounds'])
 
 	print ('number of words in analysis: ' + str(len(df_selected)) + ' types')
 	print ("Spearman's rho for lexical and sublexical surprisal:" + str(ssCor))
-	print ("Spearman's rho for lexical and character length:" + str(ncharCor))
+	print ("Spearman's rho for lexical and number of sounds" + str(nSoundsCor))
 	
 	df_selected.to_csv(outfile, index=False, encoding='utf-8')
 
@@ -1125,12 +1129,10 @@ def validateCorpus(corpusSpecification):
 def cleanString(string): 
 		return(''.join(e for e in string if e.isalpha() or e in ("'") or e.isspace()))	
 
-def cleanUnigramCountFile(inputfile, outputfile, n, language):	
+def cleanUnigramCountFile(inputfile, outputfile, relon, language):	
 	'''filter the unigram count file, and reduce the number of items in it'''	
-	df = pandas.read_table(inputfile, encoding='utf-8')
-	print("{:,} types".format(len(df)))
-	print("{:,} tokens".format(sum(df['count'])))
-	
+	df = pandas.read_table(inputfile, encoding='utf-8')	
+	df.columns = ['word','count']
 	#take some multiple of items to run the filters on
 	
 	#discard purely numeric items
@@ -1157,7 +1159,7 @@ def cleanUnigramCountFile(inputfile, outputfile, n, language):
 	#df_clean.ix[~df_clean['aspell']]	
 	to_write = df_clean.ix[df_clean['aspell']]
 	to_write = to_write.drop('aspell', axis=1)
-	to_write.to_csv(outputfile, sep='\t', index=False, encoding='utf-8')
+	to_write.to_csv(outputfile, sep='\t', index=False, header=False, encoding='utf-8')
 	print('Wrote to file: '+outputfile)
 
 
@@ -1224,3 +1226,10 @@ def fixPunctuation(inputfile, outputfile, order):
 	iff.close()
 	off.close()
 	print('Finished fixing the punctuation, output in file '+str(outputfile))
+
+
+def utfify(unicode):
+	'''take a perfectly good string and pepper it with unicode	in an attempt to break our architecture'''
+	remap = {u's':u'š',u'e':u'ë',u'a':u'æ',u'z':u'ž',u'y':u'ÿ',u'c':u'ç',u'n':u'ñ'}
+	return(u''.join([remap[x] if x in remap.keys() else x for x in list(unicode)]))
+
