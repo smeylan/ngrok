@@ -77,7 +77,7 @@ corporaToAnalyze = [
 # 	'inputdir':inputDir,
 # 	'faststoragedir': fastStorageDir,
 # 	'slowstoragedir': slowStorageDir,
-# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/fr_2013.txt',
+# 	'wordlist': '/shared_hd0/corpora/OPUS/2013_OPUS/withPhonology/fr_2013.txt',
 # 	'country_code': 'fr'},
 # {'corpus':'Google1T',
 # 	'language':'DUTCH',

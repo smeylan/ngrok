@@ -629,19 +629,35 @@ def analyzeCorpus(corpusSpecification):
 	forwardsNminus1txt = os.path.join(lexSurpDir,str(int(n)-1)+'gram-forwards-collapsed.txt')
 
 	lexfile = os.path.join(lexSurpDir, 'opus_meanSurprisal25k.csv')	
-	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['wordlist'], 0,lexfile)
-	#what wordlist is being used in getting the mean surprisal numbers?
-	#take the top 25k words? or OPUS for each language?    
+	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['wordlist'], 0,lexfile)	
 
-
-	print('Getting sublexical surprisal estimates for types in the language...')	
+	print('Getting sublexical surprisal estimates for types in the language, using IPA...')	
 	numberOfTypesInModel = 25000
-	sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sublex.csv')
-	getSublexicalSurprisals(unigramCountFilePath, sublexFilePath, numberOfTypesInModel, corpusSpecification['country_code'])
 	
-	#this should produce the sublex
-	outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_200ksublex.csv')
-	analyzeSurprisalCorrelations(lexfile, sublexFilePath, corpusSpecification['wordlist'], outfile)
+	ipa_sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_ipa_sublex.csv')
+	
+	getSublexicalSurprisals(unigramCountFilePath, ipa_sublexFilePath, 'ipa', numberOfTypesInModel, corpusSpecification['country_code'])
+	ipa_outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_ipa_ksublex.csv')
+	
+	print('Getting sublexical surprisal estimates for types in the language, using orthography...')	
+	numberOfTypesInModel = 25000
+	ortho_sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_ortho_sublex.csv')
+	getSublexicalSurprisals(unigramCountFilePath, ortho_sublexFilePath, 'ortho', numberOfTypesInModel, corpusSpecification['country_code'])
+	ortho_outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_ortho_sublex.csv')
+	
+
+	print('Getting sublexical surprisal estimates for types in the language, using SAMPA...')	
+	#numberOfTypesInModel = 25000
+	#sampa_sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sampa_sublex.csv')
+	#getSublexicalSurprisals(unigramCountFilePath, sampa_sublexFilePath, 'sampa', numberOfTypesInModel, corpusSpecification['country_code'])
+	#sampa_outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_sampa_sublex.csv')
+
+	print('Correlation with IPA sublexical model:')	
+	analyzeSurprisalCorrelations(lexfile, ipa_sublexFilePath, corpusSpecification['wordlist'], ipa_outfile)
+	print('Correlation with orthographic sublexical model:')	
+	analyzeSurprisalCorrelations(lexfile, ortho_sublexFilePath, corpusSpecification['wordlist'], ortho_outfile)
+	#print('Correlation with SAMPA sublexical model:')	
+	#analyzeSurprisalCorrelations(lexfile, sampa_sublexFilePath, corpusSpecification['wordlist'], sampa_outfile)
 		
 
 def getPlaintextLanguageModel(corpusSpecification, n, reverse, cleaningFunction):	
@@ -878,7 +894,7 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 	uwst = None if num_context == 0 else unweightedSurprisal / float(num_context)
 	return (word, st, uwst, total_freq, num_context, (stop_time-start_time))
 
-def getSublexicalSurprisals(inputfile, outputfile, n, language):
+def getSublexicalSurprisals(inputfile, outputfile, column, n, language):
 	'''get the probability of each word's letter sequence using the set of words in the language''' 	
 	print('Retrieving sublexical surprisal estimates...')
 	
@@ -886,28 +902,36 @@ def getSublexicalSurprisals(inputfile, outputfile, n, language):
 	if n != -1:
 		df = df.iloc[0:min(n*1.2,len(df)-1)]		
 
-	pronunciations = [espeak.espeak(language,x) for x in df['word']]		
-	#as written this tesricts to items with reasonable pronunciations in the language
-
-	pdf = pandas.DataFrame(pronunciations)	#!!! should this encoding step be explicitly utf-8
-	pm = df.merge(pdf, left_on="word", right_on="word")
+	if column == 'ipa':		
+		#get the IPA representation from espeak
+		pronunciations = [espeak.espeak(language,x) for x in df['word']]				
+		pdf = pandas.DataFrame(pronunciations) #this has a column "ipa"		
+		pm = df.merge(pdf, left_on="word", right_on="word")		
+		#exclude items where pronunctiation is more than twice as long as the number of characters. This filters out many abbreviations  
+		pm['suspect'] = pm.apply(lambda x: (x['nSounds']/2.) > len(x['word']), axis=1)
+		pm = pm.ix[~pm['suspect']][0:n]
+	elif column == 'ortho':
+		pm = df
+		pm['ortho'] = [list(x) for x in pm['word']]
+		#use pm['word']
+	elif column == 'sampa':	
+		pm =  df
+		pm['sampa'] = [x.split(' ') for x in pm['sampa']]
+		#use pm['sampa']
 	
-	#exclude items where pronunctiation is more than twice as long as the number of characters. This filters out many abbreviations  
-	pm['suspect'] = pm.apply(lambda x: (x['nSounds']/2.) > len(x['word']), axis=1)
-	pm = pm.ix[~pm['suspect']][0:n]
-
-	LM = trainSublexicalSurprisalModel(pm, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)	
-	pm['ss_arrays']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm['transcription'])]
+	LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)	
+	pm['ss_arrays']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
 	pm['ss'] = [sum(x) if x is not None else 0 for x in pm['ss_arrays']]	
 
 	pm.to_csv(outputfile, index=False, encoding='utf-8')
 	print('Done!')
 
 
-def trainSublexicalSurprisalModel(wordlist_DF, order, smoothing, smoothOrder, interpolate):	
+def trainSublexicalSurprisalModel(wordlist_DF, column, order, smoothing, smoothOrder, interpolate):	
 	''' Train an n-gram language model using a list of types 
 
-		wordList: array or list of types in the language
+		wordList_DF: a pandas data DataFrame
+		column: the name of the pandas data frame to use 
 		order: integer representing the highest order encoded in the language model
 		smoothing: Smoothing technique: 'wb' or 'kn'
 		smoothOrder: list of integers, indicating which orders to smooth
@@ -927,7 +951,7 @@ def trainSublexicalSurprisalModel(wordlist_DF, order, smoothing, smoothOrder, in
 
 	# write the type inventory to the outfile
 	outfile = codecs.open(typeFile, 'w',encoding='utf-8')
-	sentences=[u' '.join(transcription) for transcription in wordlist_DF['transcription']] 
+	sentences=[u' '.join(transcription) for transcription in wordlist_DF[column]] 
 	print >> outfile, '\n'.join(sentences)
 	outfile.close()
 
@@ -990,19 +1014,17 @@ def analyzeSurprisalCorrelations(lexfile, sublexfile, wordlist_csv, outfile):
 	'''get correlations and plot the relationship between lexical and sublexical surprisal'''
 	lex_DF = pandas.read_csv(lexfile, encoding='utf-8')
 	sublex_DF = pandas.read_csv(sublexfile, encoding='utf-8')
-	wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8')	
+	#wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8')	
 
-	df = lex_DF.merge(sublex_DF, on='word').sort('frequency', ascending=False)	
-
-	df_selected = wordlist_DF.merge(df, on='word').sort('frequency', ascending=False).dropna()
-	
-	
+	df_selected = lex_DF.merge(sublex_DF, on='word').sort('frequency', ascending=False).dropna()
+	#df_selected = wordlist_DF.merge(df, on='word').sort('frequency', ascending=False)
+		
 	ssCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['ss'])
 	nSoundsCor = scipy.stats.spearmanr(-1*df_selected['mean_surprisal_weighted'], df_selected['nSounds'])
 
 	print ('number of words in analysis: ' + str(len(df_selected)) + ' types')
-	print ("Spearman's rho for lexical and sublexical surprisal:" + str(ssCor))
-	print ("Spearman's rho for lexical and number of sounds" + str(nSoundsCor))
+	print ("Spearman's rho for lexical surprisal and sublexical surprisal:" + str(ssCor))
+	print ("Spearman's rho for lexical surprisal and number of sounds" + str(nSoundsCor))
 	
 	df_selected.to_csv(outfile, index=False, encoding='utf-8')
 
