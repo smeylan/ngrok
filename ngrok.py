@@ -126,7 +126,7 @@ def processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, earliest, lat
 	print('Done! processed '+str(len(myList))+' files; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 	
 
 
-def collapseNgrams(inputfile, outputfile):
+def collapseNgrams(inputfile, outputfile):	
 	'''aggregate across dates from a google-formatted ngram file'''
 	bufsize = 10000000
 	print('Collapsing years...')	
@@ -135,54 +135,47 @@ def collapseNgrams(inputfile, outputfile):
 	firstLine ='\n' #handle any lines that are blank at the beginning of the text
 	#need to confirm that there is anything in the file
 	while firstLine == '\n' or firstLine == '':
-		firstLine = iff.readline()
-	
+		firstLine = iff.readline()	
+
 	lineSplit = firstLine.split('\t')
 	prev_ngram = lineSplit[0]
-	if len(lineSplit) == 3:
-		ncols = 3
-		print('3 tab-delineated columns, assuming first is the ngram, second is the token and the third the context count')
-		cached_count = int(lineSplit[1])
-		cached_context_count = int(lineSplit[2])				
+	if len(lineSplit) == 4:		
+		print('4 tab-delineated columns, assuming first is the ngram, second is the year, thirtd is the token, and the fourth the context count')
+		ncols = 4
+		cached_count = int(lineSplit[2])
 	elif len(lineSplit) == 2:
 		print('2 tab-delineated columns, assuming first is the ngram, second is the token count')	
+		ncols = 2
 		cached_count = int(lineSplit[-1])		
-		ncols = 2		
+				
 	rows =[]
 
 	for c,l in enumerate(iff):
-		line = l.split('\t')
-		if len(line) != ncols:			
-			print 'Mismatch in line length and ncols, line was '+line
+		line = l.split('\t')		
+		if len(line) != ncols:
+			print 'Mismatch in line length and ncols, line was '+line[0]
 			break
 		ngram = line[0]
-		count = int(line[1])
-		if ncols == 3: 
-			context_count = int(line[2])
+		if ncols == 2:
+			count = int(line[1]) #second column is the token count		
+		elif ncols == 4:
+			count = int(line[2]) #third column is the token count	
 				
 		if(ngram != prev_ngram): #new ngram, write out the cached one			
 			#after appending row to the buffer, reset the storage
-			if ncols == 3:
-				rows.append('\t'.join([prev_ngram, str(cached_count), str(cached_context_count) ]))
-			elif ncols == 2:	
-				rows.append('\t'.join([prev_ngram, str(cached_count)]))
+			rows.append('\t'.join([prev_ngram, str(cached_count)]))
 
 			prev_ngram = ngram
 			cached_count = count
-			if ncols == 3:				
-				cached_context_count = context_count
+			
 		else:
-			cached_count += count
-			if ncols == 3:
-				cached_context_count += context_count
+			cached_count += count			
 
 		if c % bufsize == 0:	
 			off.write('\n'.join(rows)+'\n')
 			rows =[] 
-	if ncols == 3:
-		rows.append('\t'.join([prev_ngram, str(cached_count), str(cached_context_count)])) # catch the last record		
-	elif ncols == 2:
-		rows.append('\t'.join([prev_ngram, str(cached_count)])) # catch the last record		
+	
+	rows.append('\t'.join([prev_ngram, str(cached_count)])) # catch the last record			
 
 	off.write('\n'.join(rows)+'\n')	#catch any records since the last buffered write						 	
 	iff.close()
@@ -581,9 +574,10 @@ def analyzeCorpus(corpusSpecification):
 	print('Processing '+corpus+':'+language)
 
 	lexSurpDir, sublexSurpDir, correlationsDir, processedDir = makeDirectoryStructure(corpusSpecification['faststoragedir'], corpusSpecification['slowstoragedir'], corpusSpecification['analysisname'], corpusSpecification['corpus'], corpusSpecification['language'], int(corpusSpecification['order']))	
-
+	
+	pdb.set_trace()
 	if (corpus == 'GoogleBooks2012'):
-		if (language in ('eng', 'spa', 'fre','ger','test')):					
+		if (language in ('eng-all', 'spa-all', 'fre-all','ger-all','test')):					
 			print('Checking if input files exist...')			
 			
 			print('Building language models...')
@@ -594,7 +588,7 @@ def analyzeCorpus(corpusSpecification):
 		else:
 			raise NotImplementedError		
 	elif(corpus == 'Google1T'):
-		if (language in ('SPANISH','ENGLISH','FRENCH','DUTCH','GERMAN')):
+		if (language in ('SPANISH','ENGLISH','FRENCH','DUTCH','GERMAN','SWEDISH','CZECH','ROMANIAN','POLISH','PORTUGUESE','ITALIAN')):
 			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='bz2')
 			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='bz2')
 	elif(corpus == 'BNC'):
@@ -631,34 +625,26 @@ def analyzeCorpus(corpusSpecification):
 	lexfile = os.path.join(lexSurpDir, 'opus_meanSurprisal25k.csv')	
 	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['wordlist'], 0,lexfile)	
 
+	numberOfTypesInModel = 25000
+	sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sublex.csv')
 	print('Getting sublexical surprisal estimates for types in the language, using IPA...')	
-	numberOfTypesInModel = 25000
 	
-	ipa_sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_ipa_sublex.csv')
-	
-	getSublexicalSurprisals(unigramCountFilePath, ipa_sublexFilePath, 'ipa', numberOfTypesInModel, corpusSpecification['country_code'])
-	ipa_outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_ipa_ksublex.csv')
-	
-	print('Getting sublexical surprisal estimates for types in the language, using orthography...')	
-	numberOfTypesInModel = 25000
-	ortho_sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_ortho_sublex.csv')
-	getSublexicalSurprisals(unigramCountFilePath, ortho_sublexFilePath, 'ortho', numberOfTypesInModel, corpusSpecification['country_code'])
-	ortho_outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_ortho_sublex.csv')
-	
+	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'ipa', numberOfTypesInModel, corpusSpecification['country_code'])
+	#second argument is the file to augment
 
+	print('Getting sublexical surprisal estimates for types in the language, using orthography...')		
+	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'ortho', numberOfTypesInModel, corpusSpecification['country_code'])
+	
 	print('Getting sublexical surprisal estimates for types in the language, using SAMPA...')	
-	#numberOfTypesInModel = 25000
-	#sampa_sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sampa_sublex.csv')
-	#getSublexicalSurprisals(unigramCountFilePath, sampa_sublexFilePath, 'sampa', numberOfTypesInModel, corpusSpecification['country_code'])
-	#sampa_outfile = os.path.join(correlationsDir,'opus_meanSurprisal25k_sampa_sublex.csv')
+	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'sampa', numberOfTypesInModel, corpusSpecification['country_code'])
 
-	print('Correlation with IPA sublexical model:')	
-	analyzeSurprisalCorrelations(lexfile, ipa_sublexFilePath, corpusSpecification['wordlist'], ipa_outfile)
-	print('Correlation with orthographic sublexical model:')	
-	analyzeSurprisalCorrelations(lexfile, ortho_sublexFilePath, corpusSpecification['wordlist'], ortho_outfile)
-	#print('Correlation with SAMPA sublexical model:')	
-	#analyzeSurprisalCorrelations(lexfile, sampa_sublexFilePath, corpusSpecification['wordlist'], sampa_outfile)
-		
+	print('Getting sublexical surprisal estimate for types in the language, building it over the characters')
+	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'character', numberOfTypesInModel, corpusSpecification['country_code'])
+
+	#opus_meanSurprisal25k_sublex.csv')
+	#analyzeSurprisalCorrelations(lexfile, ipa_sublexFilePath, corpusSpecification['wordlist'], outfile)
+	#!!! do the analysis in R?
+	
 
 def getPlaintextLanguageModel(corpusSpecification, n, reverse, cleaningFunction):	
 	'''This metafunction produces a ZS language model from a large plaintext document using the program "ngrams" from the AutoCorpus Debian package to count the n-gram frequencies for a specified order (n). Example use: for producing a ZS file from the BNC.'''
@@ -719,9 +705,6 @@ def rearrangeNgramFile(inputfile, outputfile, reverse):
 def marginalizeNgramFile(inputfile, outputfile, n, sorttype):
 	'''collapse counts from inputfile for sequences of length n'''
 	print('Marignalizing over counts from higher-order ngram file to produce counts of '+str(n)+'-grams')	
-	#this method is lossy-- not all bigrams present in the dataset will be here--but the counts are consistent with the higher order ngram file.	
-	#!!! marginalizer needs to handle tab and space separated input	
-	#!!! combining context counts doesn't take into account that the same contexts might be used in both cases
 	iff = codecs.open(inputfile, 'r', encoding='utf-8')
 	
 	tf_path = os.path.join(os.path.dirname(inputfile),next(tempfile._get_candidate_names()))
@@ -729,53 +712,41 @@ def marginalizeNgramFile(inputfile, outputfile, n, sorttype):
 	tf = codecs.open(tf_path, 'w', encoding='utf-8')	
 
 	firstLine ='\n' #handle any lines that are blank at the beginning of the text
-	while firstLine == '\n':
+	while firstLine == '\n' or firstLine == '':
 		firstLine = iff.readline()
 
 	linesplit = firstLine.split('\t')
 	cachedNgram = ' '.join(linesplit[0].split(' ')[0:n])
 	cachedCount = int(linesplit[1]) 
-	if len(linesplit)== 3:
-		cachedContextCount = int(linesplit[2]) 
-		ncols = 3
-	else:
-		ncols = 2
+	ncols =  len(linesplit)		
 
 	print('Collapsing counts...')
 	for l in iff:
 		parts = l.split('\t')
 		ngram = ' '.join(parts[0].split(' ')[0:n])		
-		count = int(parts[1])
-		if ncols == 3:
-			contextCount = int(parts[2])					
+		if ncols == 2:
+			count = int(parts[1])
+		elif ncols == 4:	
+			count = int(parts[2])
+		
 		#if the ngram isn't the same, print out the last trigram and add it to the aggregate count, and restart the count
 		if ngram != cachedNgram:
 			#print('Added to total '+cachedNgram+': '+str(cachedCount))
 			if (sorttype == 'numeric'):
 				tf.write(str(cachedCount)+'\t'+cachedNgram+'\n')
 			elif (sorttype == 'alphabetic'):
-				if ncols == 3:	
-					tf.write(cachedNgram+'\t'+str(cachedCount)+'\t'+str(cachedContextCount)+'\n')
-				elif ncols == 2:
-					tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')	
+				tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')	
 
 			#restart the count, for the next ngram
 			cachedNgram = ngram
-			cachedCount = count
-			if ncols == 3:
-				cachedContextCount = contextCount
+			cachedCount = count			
 		else:
 			#if it is the same, add it to the aggregate count
-			cachedCount += count
-			if ncols == 3:
-				cachedContextCount += contextCount
+			cachedCount += count			
 			#print('Increased '+cachedNgram+' count to : '+str(cachedCount))
 	#obligate write of final cached value at the end 
 	if sorttype == 'alphabetic':               
-		if ncols == 3:	
-			tf.write(cachedNgram+'\t'+str(cachedCount)+'\t'+str(cachedContextCount)+'\n')
-		elif ncols == 2:
-			tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')	
+		tf.write(cachedNgram+'\t'+str(cachedCount)+'\n')		
 	else:
 		tf.write(str(cachedCount)+'\t'+cachedNgram+'\n')		
 
@@ -894,40 +865,73 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 	uwst = None if num_context == 0 else unweightedSurprisal / float(num_context)
 	return (word, st, uwst, total_freq, num_context, (stop_time-start_time))
 
-def getSublexicalSurprisals(inputfile, outputfile, column, n, language):
-	'''get the probability of each word's letter sequence using the set of words in the language''' 	
+def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
+	'''get the probability of each word's letter sequence using the set of words in the language
+		#first argument is the set of types over which the model will be computed, in this case the 2013 subtitle data
+		#second argument is the name of the file to augment. If it doesn't exist, a new file is created
+		#third is the kind of model to build
+		#number of types in the model specifies how much of the first argument to use, e.g. 5k
+		#fifth is the country code, which is used in the call to espeak or aspell (or both?) 
+	''' 
 	print('Retrieving sublexical surprisal estimates...')
 	
-	df = pandas.read_table(inputfile, encoding='utf-8').dropna()
+	lex = pandas.read_table(lexiconfile, encoding='utf-8').dropna()	
 	if n != -1:
-		df = df.iloc[0:min(n*1.2,len(df)-1)]		
+		lex = lex.iloc[0:min(n*1.2,len(lex)-1)] #take some padding because some will be thrown out with later filters		
 
-	if column == 'ipa':		
+	sublexLMfileDir = os.path.join(os.path.dirname(augmentfile), column)
+	if not os.path.exists(sublexLMfileDir):
+		os.makedirs(sublexLMfileDir)
+
+	if column == 'character':				
+		pm = lex
+		pm['character'] = [list(x) for x in pm['word']]
+		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir = sublexLMfileDir)	
+		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
+	elif column == 'ipa':		
 		#get the IPA representation from espeak
-		pronunciations = [espeak.espeak(language,x) for x in df['word']]				
+		if language == u'en':
+			espeak_lang = u'en-US'
+		else:
+			espeak_lang = language	
+
+		pronunciations = [espeak.espeak(espeak_lang,x) for x in lex['word']]				
 		pdf = pandas.DataFrame(pronunciations) #this has a column "ipa"		
-		pm = df.merge(pdf, left_on="word", right_on="word")		
+		pm = lex.merge(pdf, left_on="word", right_on="word")	#!!! this restricts the size of the model	
 		#exclude items where pronunctiation is more than twice as long as the number of characters. This filters out many abbreviations  
+		pm['nSounds'] = [len(x) for x in pm['ipa']]	
 		pm['suspect'] = pm.apply(lambda x: (x['nSounds']/2.) > len(x['word']), axis=1)
 		pm = pm.ix[~pm['suspect']][0:n]
+		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir=sublexLMfileDir)	
+		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
 	elif column == 'ortho':
-		pm = df
+		pm = lex
 		pm['ortho'] = [list(x) for x in pm['word']]
-		#use pm['word']
-	elif column == 'sampa':	
-		pm =  df
-		pm['sampa'] = [x.split(' ') for x in pm['sampa']]
-		#use pm['sampa']
-	
-	LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True)	
-	pm['ss_arrays']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
-	pm['ss'] = [sum(x) if x is not None else 0 for x in pm['ss_arrays']]	
+		pm[column+'_ss_array'] = [[1]*len(x) for x in pm['ortho']]
 
-	pm.to_csv(outputfile, index=False, encoding='utf-8')
+		#use pm['word']
+	elif column == 'sampa':			
+		pm =  lex
+		if not 'sampa' in pm.columns:
+			print 'Must have SAMPA column to compute sublexical model for SAMPA'
+			return None #can't compute SAMPA on the fly
+		pm['sampa'] = [x.split(' ') for x in pm['sampa']]
+		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir= sublexLMfileDir)	
+		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
+	
+	
+	pm[column+'_ss'] = [sum(x) if x is not None else 0 for x in pm[column+'_ss_array']]	
+	pm[column+'_n'] = [len(x) if x is not None else 0 for x in pm[column+'_ss_array']]
+	
+	#add the new results to the augmentfile and write it out
+	if os.path.exists(augmentfile):
+		aug = pandas.read_csv(augmentfile, encoding='utf-8').dropna()	
+		aug.merge(pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']], left_on="word", right_on="word").to_csv(augmentfile, index=False, encoding='utf-8')
+	else: 
+		pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']].to_csv(augmentfile, index=False, encoding='utf-8')			
 	print('Done!')
 
-
-def trainSublexicalSurprisalModel(wordlist_DF, column, order, smoothing, smoothOrder, interpolate):	
+def trainSublexicalSurprisalModel(wordlist_DF, column, order, smoothing, smoothOrder, interpolate, sublexlmfiledir):	
 	''' Train an n-gram language model using a list of types 
 
 		wordList_DF: a pandas data DataFrame
@@ -936,18 +940,15 @@ def trainSublexicalSurprisalModel(wordlist_DF, column, order, smoothing, smoothO
 		smoothing: Smoothing technique: 'wb' or 'kn'
 		smoothOrder: list of integers, indicating which orders to smooth
 		interpolate: boolean, indicating whether to use interpolation or not
+		sublexlmfiledir: where should the type file and the language model be stored?
 
 	'''
 
 	# ensure that ngram-count is on the path. shouldn't need to do this from the command line	
 	#os.environ['PATH'] = os.environ['PATH']+':'+srilmPath
 	#generate the relevant filenames
-	timestr = str(time.strftime("%Y%m%d-%H%M%S"))
-	if not os.path.exists('temp/'): #!!! we probably shouldn't write to temp in this way
-		os.makedirs('temp/')
-	basePath= os.getcwd() + '/temp/' +timestr + '_'
-	typeFile = basePath + 'typeFile.txt'
-	modelFile = basePath + smoothing + '.LM'
+	typeFile = os.path.join(sublexlmfiledir, 'typeFile.txt')
+	modelFile = os.path.join(sublexlmfiledir, 'types.LM')
 
 	# write the type inventory to the outfile
 	outfile = codecs.open(typeFile, 'w',encoding='utf-8')
@@ -1174,7 +1175,10 @@ def cleanUnigramCountFile(inputfile, outputfile, relon, language):
 	
 	df_clean['word'] = [cleanString(x) for x in df_clean['word']] 
 
-	speller = aspell.Speller(('lang',language),('encoding','utf-8'))
+	aspellLang = language
+	if aspellLang == 'pt':
+		aspellLang = 'pt-BR'
+	speller = aspell.Speller(('lang',aspellLang),('encoding','utf-8'))
 	df_clean['aspell'] = [speller.check(x.encode('utf-8')) == 1 for x in df_clean['word']]
 
 	#check the rejected words
@@ -1202,9 +1206,9 @@ def fixPunctuation(inputfile, outputfile, order):
 	ngram_split = [x for x in ngram.split(' ') if x != u"'" and x != u'']
 	count = int(lineSplit[1])
 	
-	if len(lineSplit) == 3:		
+	if len(lineSplit) == 4:		
 		print('3 tab-delineated columns, assuming first is the ngram, second is the token and the third the context count')								
-		ncols = 3	
+		ncols = 4	
 		context_count = int(lineSplit[2])
 		if len(ngram_split) == order:
 			rows.append('\t'.join([ngram, str(count), str(context_count)]))	
@@ -1224,7 +1228,7 @@ def fixPunctuation(inputfile, outputfile, order):
 		if len(ngram_split) != order:
 			continue
 		count = int(line[1])
-		if ncols == 3: 
+		if ncols == 4: 
 			context_count = int(line[2])
 		
 		#fix the ngram
@@ -1235,7 +1239,7 @@ def fixPunctuation(inputfile, outputfile, order):
 		if len(ngram_split) != order:
 			continue #there aren't N items after cleaning; exclude from the output
 
-		if ncols == 3:
+		if ncols == 4:
 			rows.append('\t'.join([ngram, str(count), str(context_count)]))
 		elif ncols == 2:	
 			rows.append('\t'.join([ngram, str(count)]))
@@ -1249,9 +1253,183 @@ def fixPunctuation(inputfile, outputfile, order):
 	off.close()
 	print('Finished fixing the punctuation, output in file '+str(outputfile))
 
-
 def utfify(unicode):
 	'''take a perfectly good string and pepper it with unicode	in an attempt to break our architecture'''
 	remap = {u's':u'š',u'e':u'ë',u'a':u'æ',u'z':u'ž',u'y':u'ÿ',u'c':u'ç',u'n':u'ñ'}
 	return(u''.join([remap[x] if x in remap.keys() else x for x in list(unicode)]))
 
+def letterize(inputfile, outputfile, splitwords, espeak_lang, phonebreak, par):
+	'''take textfile, split by words, and output a list of letters or phones (phones if espeak_lang is not None) separated by phonebreak. This can then be used as input to SRILM for various models'''
+		#!!! a more efficient way to do the ipa translation would be to make a hashmap of the whole dictionary
+	if par:
+		print 'Calling parallelized version of letterize'
+		arguments = {'inputfile':inputfile,'outputfile': outputfile, 'splitwords':splitwords, 'espeak_lang': espeak_lang, 'phonebreak':phonebreak}
+		embpar(letterize, arguments)
+	else:	
+		print 'Executing single-thread version of letterize'
+		iff = codecs.open(inputfile, 'r', encoding='utf-8')
+		off = codecs.open(outputfile, 'w', encoding='utf-8')	
+
+		phonebreak = phonebreak[1:-1] #get rid of quotes
+
+		if espeak_lang == 'None':
+			espeak_lang = None
+
+		if espeak_lang:
+			#make a cached for the frequently used tokens
+			espeak_cache = {}
+
+		for c,l in enumerate(iff):
+			if l == '\n':
+				pass
+			else:				
+				if splitwords: #output each word on a separate line					
+					words = l.split(' ')
+					for word in words:
+						if not espeak_lang:
+							off.write(phonebreak.join(list(word))+'\n')
+						else:								
+							#translate to espeak
+							if word in espeak_cache.keys(): #check if that token is cached already
+								lexItem =  espeak_cache[word]	
+							else:		
+								lexItem = espeak.espeak(espeak_lang,word)['ipa']						
+								espeak_cache[word] = lexItem
+							off.write(phonebreak.join(lexItem)+'\n')
+				else: 
+					if not espeak_lang: #all on a single line
+						off.write(phonebreak.join(list(l.replace(' ','')))+'\n')		
+					else:
+						words = l.split(' ')
+						translatedWords = []
+						for word in words:							
+							if word in espeak_cache.keys(): #check if that token is cached already
+								lexItem = espeak_cache[word]								
+								translatedWords.append(phonebreak.join(lexItem))	
+							else:		
+								lexItem = espeak.espeak(espeak_lang,word)['ipa']						
+								espeak_cache[word] = lexItem
+								translatedWords.append(phonebreak.join(lexItem))			
+						off.write(u' '.join(translatedWords)+'\n')	
+
+		iff.close()		
+		off.close()
+		return(outputfile)	
+
+
+def filterByWordList(inputfile, outputfile, loweronly, vocabfile,n, par):
+	'''take a textfile, split by words, and check if each word is in the provided vocabfile'''
+	if(par):
+		print 'Calling parallelized version of filterByWordList'
+		arguments = {'inputfile':inputfile,'outputfile': outputfile, 'loweronly':loweronly, 'vocabfile':vocabfile, 'n':n}
+		embpar(filterByWordList, arguments)
+	else:		
+		print 'Executing single-thread version of filterByWordList'
+		def filterWords(l, loweronly, vocab):		
+			if loweronly:
+				words = l.replace('\n','').split(' ')
+				return(u' '.join([word for word in words if word in vocab]))
+			else: 	
+				words = l.replace('\n','').lower().split(' ')
+				return(u' '.join([word for word in words if word in vocab]))
+
+		vocab = set(pandas.read_table(vocabfile, encoding='utf-8', sep='\t')['word'][0:n])
+
+		iff = codecs.open(inputfile, 'r')
+		off = codecs.open(outputfile, 'w', encoding='utf-8')	
+
+		bufsize = 100000	
+		lineStore = []
+
+		for c,l in enumerate(iff):
+			lineStore.append(l)
+			if c % bufsize == 0:#refresh the buffer	
+				rows = [filterWords(l,loweronly,vocab) for l in lineStore]
+				off.write('\n'.join(rows)+'\n')
+				lineStore =[] 
+				print 'Processed '+os.path.basename(inputfile)+' through line '+ str(c)
+		rows = [filterWords(l,loweronly,vocab) for l in lineStore]	
+		off.write('\n'.join(rows)+'\n')
+
+		iff.close()		
+		off.close()
+		return(outputfile)		
+
+def par_filterByWordList(idc):
+	filterByWordList(idc['inputfile'], idc['outputfile'], idc['loweronly'], idc['vocabfile'],idc['n'], par=False)
+
+def par_letterize(idc):
+	letterize(idc['inputfile'], idc['outputfile'], idc['splitwords'], idc['espeak_lang'], idc['phonebreak'], par=False)
+
+
+functionMappings = {
+	'filterByWordList' : par_filterByWordList,
+	'letterize' : par_letterize
+}
+
+def embpar(functionName, arguments):
+	#dict wrappers for functions that can be called with embpar
+
+	def file_len(fname):
+	    with open(fname) as f:
+	        for i, l in enumerate(f):
+	            pass
+	    return i + 1
+
+	def split_seq(numItems, numRanges):
+		newseq = []
+		splitsize = 1.0/numRanges*numItems
+		for i in range(numRanges):
+			newseq.append((int(round(i*splitsize)),int(round((i+1)*splitsize))))
+		return newseq
+
+	def splitfile(inputfile, n):
+		'''divide inputfile into n approximately equal-sized parts.'''			
+		fileLength = file_len(arguments['inputfile'])
+		lineRanges = split_seq(fileLength, n)
+		rangeStarts = set([x[0] for x in lineRanges])	
+
+		iff = codecs.open(arguments['inputfile'], 'r',encoding='utf-8')
+		filenames = []
+		
+		for c,l in enumerate(iff):			
+			if c in rangeStarts: #switch the output file
+				filename = arguments['inputfile']+'-'+str(c)
+				filenames.append(filename)
+				off = codecs.open(filename, 'w', encoding='utf-8')	
+			off.write(l)	
+		off.close()	
+		return(filenames)
+
+	n = multiprocessing.cpu_count()	
+	print 'Splitting file: '+arguments['inputfile']
+	subfiles = splitfile(file_len(arguments['inputfile']), n)	
+	#subfiles = glob.glob(os.path.join(os.path.dirname(arguments['inputfile']),'*.txt-*'))
+
+	#get the string of the function name
+	if functionName.__name__ is 'filterByWordList':
+		#build the inputs
+		print 'Building inputs for parallelization'
+		inputs = [{'inputfile':subfiles[x],
+					'outputfile':subfiles[x]+'_out',
+					'loweronly': arguments['loweronly'],
+					'vocabfile': arguments['vocabfile'],
+					'n': arguments['n']} for x in range(0,n)]	
+	elif functionName.__name__ is 'letterize':				
+		inputs = [{'inputfile':subfiles[x],
+					'outputfile':subfiles[x]+'_out',
+					'splitwords':arguments['splitwords'],
+					'espeak_lang':arguments['espeak_lang'],
+					'phonebreak':arguments['phonebreak']} for x in range(0,n)]
+
+	print 'Starting parallelized execution...'					
+	resultfiles = Parallel(n_jobs=n)(delayed(functionMappings[functionName.__name__])(i) for i in inputs)  
+	#resultfiles = glob.glob(os.path.join(os.path.dirname(arguments['inputfile']),'*_out'))
+
+
+	print('Combining files from parallelization...')
+	combineFiles(os.path.dirname(arguments['outputfile']), '*_out', arguments['outputfile'])	
+	print('Deleting temporary files from parallelization...')
+	[os.remove(file) for file in subfiles]
+	[os.remove(file) for file in resultfiles]
+	

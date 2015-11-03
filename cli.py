@@ -178,16 +178,16 @@ def getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cuto
 	'''Compute mean surprisal / information content for a list of words'''
 	ngrok.getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cutoff, outputfile)	
 
-#getSublexicalSurprisals
+#addSublexicalSurprisals
 @cli.command() 
 @click.option('--inputfile', type=click.Path(), help="Filename of the input files. Must contain 'word' as a column name", required=True)
 @click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
 @click.option('--column', type=str, help="name of the column to build the sublexical surprisal model from", required=True)
 @click.option('--n', type=int, help="Number of types to use in the model. Input file must be ordered for this to make sense. -1 indicates use the entire 'word' column")
 @click.option('--language', type=str, help="2-letter language code", required=True)
-def getSublexicalSurprisals(inputfile, outputfile, column, n, language):
+def addSublexicalSurprisals(inputfile, outputfile, column, n, language):
 	'''get the probability of each word's letter sequence using the set of words in the language'''
-	ngrok.getSublexicalSurprisals(inputfile, outputfile, column, n, language)
+	ngrok.addSublexicalSurprisals(inputfile, outputfile, column, n, language)
 
 #analyzeSurprisalCorrelations
 @cli.command() 
@@ -229,10 +229,41 @@ def cleanUnigramCountFile(inputfile, outputfile, n):
 #fixPunctuation
 @cli.command() 
 @click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
-@click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)', required=True)
+@click.option('--outputfile', type=click.Path(), help='The file name for output', required=True)
 @click.option('--order', type=int, help="order of ngrams to download", required=True)
 def fixPunctuation(inputfile, outputfile, order):	
 	ngrok.fixPunctuation(inputfile, outputfile, order)
+
+#letterize
+@cli.command() 
+@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
+@click.option('--outputfile', type=click.Path(), help='The file name for output', required=True)
+@click.option('--splitwords', type=bool, help='Utterance or word-based model. If utterance, set to False', required=True)
+@click.option('--espeak_lang', type=str, help='Language for espeak. Specify none to return letters', required=True)
+@click.option('--phonebreak', type=str, help='string to place between letters', required=True)
+@click.option('--par', type=bool, help='Parallelize the function?', required=True)
+def letterize(inputfile, outputfile, splitwords, espeak_lang, phonebreak, par):	
+	ngrok.letterize(inputfile, outputfile, splitwords, espeak_lang, phonebreak, par)
+
+#filterByWordList
+@cli.command() 
+@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
+@click.option('--outputfile', type=click.Path(), help='The file name for output', required=True)
+@click.option('--loweronly', type=bool, help='should upper case items be excluded from the count? (if so, set to True)', required=True)
+@click.option('--vocabfile', type=click.Path(), help='The file name for the wordlist to use. Must have a "word" column', required=True)
+@click.option('--n', type=int, help='The top n words to retain', required=True)
+@click.option('--par', type=bool, help='Parallelize the function?', required=True)
+def filterByWordList(inputfile, outputfile, loweronly, vocabfile, n, par):	
+	ngrok.filterByWordList(inputfile, outputfile, loweronly, vocabfile, n, par)
+
+
+#splitfile
+@cli.command() 
+@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
+@click.option('--n', type=int, help='Number of equal-sized chunks', required=True)
+def splitfile(inputfile, n):	
+	ngrok.splitfile(inputfile, n)
+
 
 if __name__ == '__main__':
     cli()
