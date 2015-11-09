@@ -221,7 +221,9 @@ def downloadCorpus(language, order, inputdir):
 @cli.command() 
 @click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
 @click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)', required=True)
-@click.option('--n', type=int, help='The top n words to retain', required=True)
+@click.option('--n', type=int, help='The top n words to retain', 
+	required=True)
+@click.option('--language', type=str, help='The name of the for the aspell dictionary', required=True)
 def cleanUnigramCountFile(inputfile, outputfile, n):
 	'''Filter the unigram count file, and reduce the number of items in it.'''
 	ngrok.cleanUnigramCountFile(inputfile, outputfile, n)
@@ -255,6 +257,15 @@ def letterize(inputfile, outputfile, splitwords, espeak_lang, phonebreak, par):
 @click.option('--par', type=bool, help='Parallelize the function?', required=True)
 def filterByWordList(inputfile, outputfile, loweronly, vocabfile, n, par):	
 	ngrok.filterByWordList(inputfile, outputfile, loweronly, vocabfile, n, par)
+
+#downloadCorpus
+@cli.command() 
+@click.option('--inputdir', type=click.Path(exists=True), help='The file name for the corpus directory', required=True)
+@click.option('--language', type=str, help='The file name for the corpus directory', required=True)
+@click.option('--order', type=str, help='order of the ngram', required=True)
+@click.option('--release', type=str, help='numeric date of the release, e.g. 20090715', required=True)
+def downloadCorpus(language, order, inputdir, release):	
+	ngrok.downloadCorpus(language, order, inputdir, release)
 
 
 #splitfile

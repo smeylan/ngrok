@@ -482,55 +482,60 @@ def getGoogleBooksLanguageModel(corpusSpecification, n, reverse, collapseyears, 
 	}
 	print zs_metadata
 	
-	print('Checking if there are appropriate cleaned text files to create lower-order language model...')	
-	tryHigher = deriveFromHigherOrderModel(intermediateFileDir, n, direction)	
-	
-	if tryHigher is not None:
-		print('Derived model from higher order model, results are at '+str(tryHigher))
-		collapsedfile = tryHigher
-	else:	
-		print('No higher-order or reversible models found. Cleaning the input files... If n > 3 and the language is English, this is a good time to grab a coffee, this will take a few hours.')
+	zsFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'.zs')
+	if not os.path.exists(zsFile):
+		print('Checking if there are appropriate cleaned text files to create lower-order language model...')	
+		tryHigher = deriveFromHigherOrderModel(intermediateFileDir, n, direction)	
 		
-		#find only lines without POS tags and make them lowercase
-		inputdir = os.path.join(corpusSpecification['inputdir'],corpusSpecification['corpus'],corpusSpecification['language'],str(n))
-		outputdir = os.path.join(corpusSpecification['slowstoragedir'],corpusSpecification['analysisname'], corpusSpecification['corpus'],corpusSpecification['language'],str(n)+'-processed')	
-	
-		combinedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-combined.txt')				
-		if collapseyears:
-			cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.yc')	
-			if cleanFileProp < .2:
-				cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
-				checkForMissingFiles(inputdir, '*.'+ filetype, outputdir, '*.yc')	
-			combineFiles(outputdir, '*.yc', combinedfile)	
-
+		if tryHigher is not None:
+			print('Derived model from higher order model, results are at '+str(tryHigher))
+			collapsedfile = tryHigher
 		else:	
-			cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
-			if cleanFileProp < .2:
-				cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
-				checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
-			combineFiles(outputdir, '*.output', combinedfile)		
-
-		#reverse if specified
-		if reverse:
-			reversedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-reversed.txt')
-			reverseGoogleFile(combinedfile, reversedfile)
-			fileToSort = reversedfile
-		else:	
-			fileToSort = combinedfile
+			print('No higher-order or reversible models found. Cleaning the input files... If n > 3 and the language is English, this is a good time to grab a coffee, this will take a few hours.')
+			
+			#find only lines without POS tags and make them lowercase
+			inputdir = os.path.join(corpusSpecification['inputdir'],corpusSpecification['corpus'],corpusSpecification['language'],str(n))
+			outputdir = os.path.join(corpusSpecification['slowstoragedir'],corpusSpecification['analysisname'], corpusSpecification['corpus'],corpusSpecification['language'],str(n)+'-processed')	
 		
-		#sort it	
-		sortedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-sorted.txt')
-		sortNgramFile(fileToSort, sortedfile)		
+			combinedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-combined.txt')				
+			if collapseyears:
+				cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.yc')	
+				if cleanFileProp < .2:
+					cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
+					checkForMissingFiles(inputdir, '*.'+ filetype, outputdir, '*.yc')	
+				combineFiles(outputdir, '*.yc', combinedfile)	
 
-		#collapse after the sorting: this deals with different POS treatments 
-		collapsedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-collapsed.txt')
-		collapseNgrams(sortedfile, collapsedfile)
-							
-	#build the language model	
-	zsFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'.zs')	
-	makeLanguageModel(collapsedfile, zsFile, zs_metadata, codec="none")
+			else:	
+				cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
+				if cleanFileProp < .2:
+					cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
+					checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
+				combineFiles(outputdir, '*.output', combinedfile)		
 
-	print('Done! Completed file is at '+zsFile+'; elapsed time is '+str(round(time.time()-startTime, 5))+' seconds') 
+			#reverse if specified
+			if reverse:
+				reversedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-reversed.txt')
+				reverseGoogleFile(combinedfile, reversedfile)
+				fileToSort = reversedfile
+			else:	
+				fileToSort = combinedfile
+			
+			#sort it	
+			sortedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-sorted.txt')
+			sortNgramFile(fileToSort, sortedfile)		
+
+			#collapse after the sorting: this deals with different POS treatments 
+			collapsedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-collapsed.txt')
+			collapseNgrams(sortedfile, collapsedfile)
+								
+		#build the language model	
+		zsFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'.zs')	
+		makeLanguageModel(collapsedfile, zsFile, zs_metadata, codec="none")
+
+		print('Done! Completed file is at '+zsFile+'; elapsed time is '+str(round(time.time()-startTime, 5))+' seconds') 
+	
+	else:
+		print('ZS file already exists at '+zsFile) 
 	return(zsFile)
 
 def makeDirectoryStructure(faststoragedir, slowstoragedir, analysisname, corpus, language, n):		
@@ -575,7 +580,6 @@ def analyzeCorpus(corpusSpecification):
 
 	lexSurpDir, sublexSurpDir, correlationsDir, processedDir = makeDirectoryStructure(corpusSpecification['faststoragedir'], corpusSpecification['slowstoragedir'], corpusSpecification['analysisname'], corpusSpecification['corpus'], corpusSpecification['language'], int(corpusSpecification['order']))	
 	
-	pdb.set_trace()
 	if (corpus == 'GoogleBooks2012'):
 		if (language in ('eng-all', 'spa-all', 'fre-all','ger-all','test')):					
 			print('Checking if input files exist...')			
@@ -588,9 +592,13 @@ def analyzeCorpus(corpusSpecification):
 		else:
 			raise NotImplementedError		
 	elif(corpus == 'Google1T'):
-		if (language in ('SPANISH','ENGLISH','FRENCH','DUTCH','GERMAN','SWEDISH','CZECH','ROMANIAN','POLISH','PORTUGUESE','ITALIAN')):
+		if (language in ('SPANISH','FRENCH','DUTCH','GERMAN','SWEDISH','CZECH','ROMANIAN','POLISH','PORTUGUESE','ITALIAN')):
 			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='bz2')
 			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='bz2')
+		elif language in ('ENGLISH'):
+			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='gz')
+			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='gz')
+
 	elif(corpus == 'BNC'):
 		if (language == 'eng'):
 			
@@ -846,7 +854,7 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 		count = int(r_split[1])
 		if count >= cutoff:
 			total_freq += count
-			context = ngram[2] + u" " + ngram[1] + u" "
+			context =u" ".join(ngram[1:][::-1])+u' '
 			num_context += 1
 			if context in bigrams_dict:
 				total_context_freq = bigrams_dict[context]
@@ -1059,7 +1067,7 @@ def checkForBinary(command):
 		raise ValueError('binary for '+command +' not found')	
 
 
-def downloadCorpus(language, order, inputdir):
+def downloadCorpus(language, order, inputdir, release):
 	import httplib2
 	from bs4 import BeautifulSoup, SoupStrainer	
 	import urllib
@@ -1076,9 +1084,9 @@ def downloadCorpus(language, order, inputdir):
 		if link.has_key('href'):
 			url = link['href']
 			# IF we match what we want:
-			if re.search(order+"gram.+20120701", url):
+			if re.search(order+"gram.+"+release, url):
 				# Decode this
-				m = re.search(r"googlebooks-([\w\-]+)-(\d+)gram.+",url)
+				m = re.search(r"googlebooks-([\w\-]+)-(\d+)gram.+"+release,url)
 				language, n = m.groups(None)
 				# Only download some language
 				#set(["eng-us-all", "fre-all", "ger-all", "heb-all", "ita-all", "rus-all", "spa-all", "chi-sim" ])
@@ -1152,7 +1160,7 @@ def validateCorpus(corpusSpecification):
 def cleanString(string): 
 		return(''.join(e for e in string if e.isalpha() or e in ("'") or e.isspace()))	
 
-def cleanUnigramCountFile(inputfile, outputfile, relon, language):	
+def cleanUnigramCountFile(inputfile, outputfile, n, language):	
 	'''filter the unigram count file, and reduce the number of items in it'''	
 	df = pandas.read_table(inputfile, encoding='utf-8')	
 	df.columns = ['word','count']
