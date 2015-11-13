@@ -41,38 +41,6 @@ def collapseNgrams(inputfile, outputfile):
 	'''Collapse dates from Google-formatted ngram files'''	
 	ngrok.collapseNgrams(inputfile, outputfile)	
 
-#processGoogle
-@cli.command() 
-@click.option('--inputfile', type=click.Path(exists=True), help='The file name for input', required=True)
-@click.option('--outputfile', type=click.Path(), help='The file name for output (year will be appended)', required=True)
-@click.option('--yearbin', type=int, default=0, help='How many bins of years?')
-@click.option('--quiet', type=bool, default=True, help= 'Output tossed lines?')
-@click.option('--n', type=int, default=3, help="Order of the ngram")
-@click.option('--latest', type=int, default=2012, help="Latest year to include")
-@click.option('--earliest', type=int, default=1800, help="Earliest year to include")
-@click.option('--reverse', type=bool, default=False, help="Reverse the ngram?")
-@click.option('--strippos', type=bool, default=True, help="Strip the part of speech information?")
-@click.option('--lower', type=bool, default=False, help="Convert ngrams to lower case?")
-def processGoogle(inputfile, outputfile, yearbin, quiet, n, latest, earliest, reverse, strippos, lower):	
-	'''Clean and shuffle columns of Google-style count file(s), separating into year bins if desired'''	
-	ngrok.processGoogle(inputfile, outputfile, yearbin, quiet, n, earliest, latest, reverse, strippos, lower)
-
-#processGoogleDirectory -- parallelized version of processGoogle
-@cli.command() 
-@click.option('--inputdir', type=click.Path(exists=True), help='The directory with the input')
-@click.option('--outputdir', type=click.Path(), help='The directory where the processed files should be output')
-@click.option('--yearbin', type=int, default=0, help='How many bins of years?')
-@click.option('--quiet', type=bool, default=True, help= 'Output tossed lines?')
-@click.option('--n', type=int, default=3, help="Order of the ngram")
-@click.option('--earliest', type=int, default=1800, help="Earliest year to include")
-@click.option('--latest', type=int, default=2012, help="Latest year to include")
-@click.option('--reverse', type=bool, default=False, help="Reverse the ngram?")
-@click.option('--strippos', type=bool, default=True, help="Strip the part of speech information?")
-@click.option('--lower', type=bool, default=False, help="Convert ngrams to lower case?")
-def processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, latest, earliest, reverse, strippos, lower):	
-	'''Parallelized applicatoin of processGoogle'''	
-	ngrok.processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, earliest, latest, reverse, strippos, lower)
-
 
 #cleanGoogleDirectory -- parallelized version of cleanGoogle
 @cli.command() 
@@ -120,6 +88,16 @@ def reverseGoogleFile(inputfile, outputfile):
 	''' Reverse the order of all columns but the last (presumably a count) in a Google count file'''
 	ngrok.reverseGoogleFile(inputfile, outputfile)
 
+#reorderGoogleFile
+@cli.command()
+@click.option('--inputfile', type=click.Path(), help="Filename of the input files", required=True)
+@click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
+@click.option('--index', type=int, help="Index of the word of interest. To use preceding words as context, set to the order of the ngram. To use following words, set to 1. For center-embedded ngrams, set to (order+1)/2; the latter requires order to be odd", required=True)
+def reorderGoogleFile(inputfile, outputfile, index):
+	'''Reorder the columns in a Google-formatted ngram file to put the word at targetWordIndex as the last item. This supports the reordering of columns so that the context is the preceding + following word, for example.'''
+	ngrok.reorderGoogleFile(inputfile, outputfile, index)
+
+
 #deriveFromHigherOrderModel
 @cli.command()
 @click.option('--intermediatefiledir', type=click.Path(), help="Directory with sorted ngram models")
@@ -133,10 +111,10 @@ def deriveFromHigherOrderModel(intermediatefiledir, n, direction):
 @cli.command()
 @click.option('--inputfile', type=click.Path(), help="Filename of the input files", required=True)
 @click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
-@click.option('--reverse', type=bool, default=False, help="reverse the order of the ngram?", required=True)
-def rearrangeNgramFile(inputfile, outputfile, reverse):
+@click.option('--direction', type=str, default=False, help="should the ngram be forwards or backwards indexed?", required=True)
+def rearrangeNgramFile(inputfile, outputfile, direction):
 	''' Move the count to the end and reverse, if specified, the order of the ngram for an ngram txt file produced by AutoCorpus'''
-	ngrok.rearrangeNgramFile(inputfile, outputfile, reverse)
+	ngrok.rearrangeNgramFile(inputfile, outputfile, direction)
 
 #marignalizeNgramFile
 @cli.command()

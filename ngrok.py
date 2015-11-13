@@ -25,18 +25,6 @@ class cgWorker(multiprocessing.Process):
         		print 'Problems encountered in cleaning '+job['inputfile']
 			self.myList.append(job['inputfile'])
 
-class pgWorker(multiprocessing.Process): 
-    '''single-thread worker for parallelized processGoogle function''' 
-    def __init__(self,queue,myList):
-        super(pgWorker, self).__init__()
-        self.queue = queue
-        self.myList = myList
-        
-    def run(self):
-        for job in iter(self.queue.get, None): # Call until the sentinel None is returned
-        	processGoogle(job['inputfile'], job['outputfile'] , job['yearbin'], job['quiet'], job['n'], job['earliest'], job['latest'], job['reverse'], job['strippos'], job['lower'])	
-        	self.myList.append(job['inputfile'])
-
 def cleanGoogleDirectory(inputdir, outputdir, collapseyears, order):
 	'''Parallelized, load-balanced execution of cleanGoogle, starting with the largest files'''
 	start_time =  time.time()
@@ -87,44 +75,6 @@ def cleanGoogleDirectory(inputdir, outputdir, collapseyears, order):
 
 	print('Done! processed '+str(len(myList))+' files; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 	
 
-def processGoogleDirectory(inputdir, outputdir, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
-	'''Parallelized, load-balanced execution of processGoogle, starting with the largest files'''
-	start_time =  time.time()
-
-	# Put the manager in charge of how the processes access the list
-	mgr = multiprocessing.Manager()
-	myList = mgr.list() 
-    
-	# FIFO Queue for multiprocessing
-	q = multiprocessing.Queue()
-    
-	# Start and keep track of processes
-	procs = []
-	for i in range(24):
-		p = pgWorker( q,myList )
-		procs.append(p)
-		p.start()
-                
-	files = glob.glob(os.path.join(inputdir,'*.gz')) 
-	filesizes = [(x, os.stat(x).st_size) for x in files]
-	filesizes.sort(key=lambda tup: tup[1], reverse=True)
-	
-	# Add data, in the form of a dictionary to the queue for our processeses to grab    
-	[q.put({"inputfile": file[0], "outputfile": os.path.join(outputdir, os.path.splitext(os.path.basename(file[0]))[0]+'.output'), 'yearbin': yearbin, "quiet": quiet, "n":n, "earliest":earliest, "latest":latest, "reverse":reverse, "strippos":strippos, "lower":lower}) for file in filesizes] 
-      
-	#append none to kill the workers with poison pills		
-	for i in range(24):
-		q.put(None) #24 sentinels to kill 24 workers
-        
-	# Ensure all processes have finished and will be terminated by the OS
-	for p in procs:
-		p.join()     
-        
-	for item in myList:
-		print(item)
-
-	print('Done! processed '+str(len(myList))+' files; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 	
-
 
 def collapseNgrams(inputfile, outputfile):	
 	'''aggregate across dates from a google-formatted ngram file'''
@@ -140,7 +90,7 @@ def collapseNgrams(inputfile, outputfile):
 	lineSplit = firstLine.split('\t')
 	prev_ngram = lineSplit[0]
 	if len(lineSplit) == 4:		
-		print('4 tab-delineated columns, assuming first is the ngram, second is the year, thirtd is the token, and the fourth the context count')
+		print('4 tab-delineated columns, assuming first is the ngram, second is the year, third is the token, and the fourth the context count')
 		ncols = 4
 		cached_count = int(lineSplit[2])
 	elif len(lineSplit) == 2:
@@ -210,170 +160,6 @@ def cleanGoogle(inputfile, outputfile, collapseyears, filetype, order):
 	os.remove(tempfile0)
 	return(outputfile)
 
-def processGoogle(inputfile, outputfile, yearbin, quiet, n, earliest, latest, reverse, strippos, lower):
-	'''Cleans the raw ngram counts from the Google download site, removing POS, capitalization, and reversing the order of the ngram as necessary. Backwards compatible with process-google.py from ngrampy. '''
-	#Adapted from ngrampy
-	BUFSIZE= int(1e6) # We can allow huge buffers if we want...
-	ENCODING = 'utf-8'
-	LINE_N = n+3 # three extra columns		
-	assert(latest > earliest)		
-
-	prev_year,prev_ngram = None, None
-	count = 0
-	year2file = dict()
-	part_count = None
-
-	# build the table of unicode characters for cleaning the punctuation
-	tbl = dict.fromkeys(i for i in xrange(sys.maxunicode)
-		if unicodedata.category(unichr(i)).startswith('P'))
-
-	# python is not much slower than perl if we pre-compile regexes
-
-	#cleanup = re.compile(r"(_[A-Za-z\_\-]+)|(\")") # The old way -- delete tags and quotes
-	line_splitter = re.compile(r"\n", re.U)
-	cleanup_quotes = re.compile(r"(\")", re.U) # kill quotes
-	#column_splitter = re.compile(r"[\s]", re.U) # split on tabs OR spaces, since some of google seems to use one or the other. 
-
-	tag_match = re.compile(r"^(.+?)(_[A-Z\_\-\.\,\;\:]+)?$", re.U) # match a tag at the end of words (assumes 
-	
-	def tagify(x):
-		"""
-		Take a word with a tag ("man_NOUN") and give back ("man","NOUN") with "NA" if the tag or word is not there
-		"""
-		m = tag_match.match(x)
-		if m:
-			g = m.groups()
-
-			word = (g[0] if g[0] is not None else "NA")
-			tag  = (g[1] if g[1] is not None else "NA")
-			return (word,tag)
-			#if g[1] is None: return (g[0], "NA")
-			#else:            return g
-		else: return []
-
-	def chain(args):
-		a = []
-		for x in args: a.extend(x)
-		return a
-
-	for f in glob.glob(inputfile):
-		
-		# Unzip and encode
-		iff = gzip.open(f, 'r')
-		for l in iff:	
-			l = l.decode('utf-8')
-
-			l = l.strip() ## To collapse case
-			l = cleanup_quotes.sub("", l)   # remove quotes
-			
-			#parts = column_splitter.split(l)
-			parts = l.split() # defaultly should handle splitting on whitespace, much friendlier with unicode
-			
-			# Our check on the number of parts -- we require this to be passed in (otherwise it's hard to parse)
-			if len(parts) != LINE_N: 
-				if not quiet: print "Wrong number of items on line: skipping ", l, parts, " IN FILE ", f
-				continue # skip this line if its garbage NOTE: this may mess up with some unicode chars?
-			#print parts	
-			# parts[-1] is the number of books -- ignored here
-			c = int(parts[-2]) # the count
-
-			if ((int(parts[-3]) < earliest) or (int(parts[-3]) > latest)):
-				#if record is outside the desired age range, advance in the for loop	
-				continue
-			if yearbin is 0:
-				year  = 0 #all records are assigned to the same year
-			else:
-				year = int(int(parts[-3]) / yearbin) * yearbin # round the year
-			
-			ngram_ar = chain(map(tagify,parts[0:-3]))
-
-			if not all([x == 'NA' for x in ngram_ar[1::2]]):
-				#only count the cases without POS tags (in odd positions)
-				continue
-
-			if not all([x.count('_') < 2 for x in ngram_ar[0::2]]):
-				#only count the cases that area actually words, not POS tags
-				continue	
-
-			#print ngram_ar
-			#if all([x != "NA" for x in ngram_ar]): # Chuck lines that don't have all things tagged
-			#else: continue
-					
-			#reverse the ngram	
-			#reverse the order in blocks of 2, noting that the first word precedes its pos,
-			#e.g. word1 pos1 pos2 word2 pos3 word3
-			#only take the string, not the POS	
-			if(reverse and strippos):			
-				revOrder = range(0,n*2,2)[::-1]
-			elif(reverse and not strippos):
-				if(n == 1):
-					revOrder = [0, 1]
-				if(n == 2):	
-					revOrder = [2, 3, 0, 1]
-				if(n == 3):	
-					revOrder = [4, 5, 2, 3, 0, 1]	
-				if(n == 4):	
-					revOrder = [6, 7, 4, 5, 2, 3, 0, 1]		
-				if(n == 5):	
-					revOrder = [8, 9 , 6, 7, 4, 5, 2, 3, 0, 1]			
-			elif(not reverse and strippos):	
-				#take [0] [0 2 4], [0 2 4 6] 
-				revOrder = range(0,n*2,2)  
-			elif(not reverse  and not strippos):		
-				#take [0 1 2 3 4 5] #done
-				revOrder = range(0, n*2)
-
-			reorderedNgram = [ngram_ar[i] for i in revOrder]			
-
-			reorderedNgram = [x for x in reorderedNgram if x != u'NA']
-			if lower:
-				ngram = [x.lower() for x in reorderedNgram]
-			else:
-				ngram = reorderedNgram
-						
-			ngram = filter(None,[remove_punctuation(x, tbl) for x in ngram])
-			
-			if len(ngram) != n: 
-				if not quiet: print "Wrong number of items on line after removing punctuation: skipping ", l, parts, " IN FILE ", f
-				continue		
-
-			ngram = "\t".join(ngram)
-			#if ngram =='&\t,\tL.Z.':
-			#	pdb.set_trace()
-			#if(reorderedNgram[0]=='_DET'):
-				#pdb.set_trace()
-
-			# output the current trigram if the current one is different
-			if year != prev_year or ngram != prev_ngram:
-				if prev_year is not None:
-					#this creates the year file if it does not exist	
-					if prev_year_s not in year2file: 
-						year2file[prev_year_s] = open(outputfile+".%i"%prev_year, 'w', BUFSIZE)
-					year2file[prev_year_s].write( "%s\t%i\n" % (prev_ngram.encode('utf-8'),count)  ) # write the preceding record to the year file TODO: This might should be unicode fanciness?
-				
-				prev_ngram = ngram
-				prev_year  = year
-				prev_year_s = str(prev_year)
-				count = c
-			else:
-				count += c
-			
-			# And write the last line if we didn't already
-			if not (year == prev_year and ngram == prev_ngram):
-				if prev_year_s not in year2file: 
-					year2file[prev_year_s] = open(outputfile+".%i"%prev_year, 'w', BUFSIZE)
-				year2file[prev_year_s].write( "%s\t%i\n" % (prev_ngram.encode('utf-8'),count)  ) # write to the year file TODO: This might should be unicode fanciness?
-
-		# Obligatory write of the last line, outside of iterating over the lines
-		if prev_year_s not in year2file: 	
-			year2file[prev_year_s] = open(outputfile+".%i"%prev_year, 'w', BUFSIZE)
-		year2file[prev_year_s].write( "%s\t%i\n" % (prev_ngram.encode('utf-8'),count))
-				
-		iff.close()
-
-	# And close everything
-	[year2file[year].close() for year in year2file.keys()]	
-
 def remove_punctuation(text, tbl):
 	'''remove punctuation from UTF8 strings given a character table'''
 	return text.translate(tbl)
@@ -409,10 +195,45 @@ def reverseGoogleFile(inputfile, outputfile):
 			ngram = strArray[0].split(' ')
 			if len(ngram) > 0: #only retain proper ngrams
 				strArray[0] = ' '.join(ngram[::-1])
-				off.write('\t'.join(strArray)+'\n')
+				off.write('\t'.join(strArray))
 	iff.close()
 	off.close()
 	print('Done!')
+
+
+def reorderGoogleFile(inputfile, outputfile, index):
+	'''Reorder the columns in a Google-formatted ngram file to put the word at targetWordIndex as the last item. This supports the reordering of columns so that the context is the preceding + following word, for example.'''
+	if index < 1:
+		raise ValueError('targetWordIndex should be indexed from 1 (like the order argument)')
+
+	#indexing from 1, the target word index can either be 1, the length of the array, or length of array +1/2 (for the center embedded trigram. The function should return an error if there are an even number of items and the target word is not the first or last
+	print('Reordering existing model')		
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')
+	firstLine = ''
+	while firstLine == '\n' or firstLine == '':
+		firstLine = iff.readline()
+	numWords = len(firstLine.split('\t')[0].split(' '))	
+	if not index in (1, numWords, (numWords+1.)/2.):
+		raise ValueError('targetWordIndex needs to be the first, last, or center item')
+	iff.close()
+	
+	iff = codecs.open(inputfile, 'r', encoding='utf-8')			
+	off = codecs.open(outputfile, 'w', encoding='utf-8')			
+	for l in iff:
+		strArray = l.split('\t')		
+		if len(strArray) > 0: #this cleans any empty lines that are produced by the cleaning process
+			ngram = strArray[0].split(' ')
+			if len(ngram) > 0 and ngram != [u'\n']: #only retain proper ngrams	
+				targetWord = [ngram[index-1]]
+				context = ngram
+				del context[index-1]
+				strArray[0] = ' '.join(context+targetWord)
+				off.write('\t'.join(strArray))
+	iff.close()
+	off.close()
+	print('Done!')
+
+
 
 def deriveFromHigherOrderModel(intermediatefiledir, n, direction):
 	'''Search for a pre-computed model from which the desired counts can be derived either through reversing or marginalization'''
@@ -463,12 +284,11 @@ def deriveFromHigherOrderModel(intermediatefiledir, n, direction):
 			return(None)
 
 
-def getGoogleBooksLanguageModel(corpusSpecification, n, reverse, collapseyears, filetype):
+def getGoogleBooksLanguageModel(corpusSpecification, n, direction, collapseyears, filetype):
 	'''Metafunction to create a ZS language model from Google Ngram counts. Does a linear cleaning, merges the file into a single document, sorts it, collapses identical prefixes, and builds the ZS file.'''
 	startTime = time.time()
 	lexSurpDir = os.path.join(corpusSpecification['faststoragedir'], corpusSpecification['analysisname'],corpusSpecification['corpus'],corpusSpecification['language'],'00_lexicalSurprisal')
 
-	direction = 'backwards' if reverse else 'forwards'
 	if not collapseyears: #keeping dates is too large to keep the intermediate files on the ssd			
 		intermediateFileDir = os.path.join(corpusSpecification['slowstoragedir'],corpusSpecification['corpus'],corpusSpecification['language'])
 	else:
@@ -511,14 +331,22 @@ def getGoogleBooksLanguageModel(corpusSpecification, n, reverse, collapseyears, 
 					cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
 					checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
 				combineFiles(outputdir, '*.output', combinedfile)		
+			
+			#reorder the columns if specified, e.g. to get center-embedded trigrams	
+			if corpusSpecification['target'] != corpusSpecification['order']:				
+				reorderedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-reordered.txt')
+				reorderGoogleFile(combinedfile, reorderedfile, int(corpusSpecification['target']))
+				fileToReverse = reorderedfile				
+			else:
+				fileToReverse = combinedfile
 
 			#reverse if specified
-			if reverse:
+			if direction == 'backwards':
 				reversedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-reversed.txt')
-				reverseGoogleFile(combinedfile, reversedfile)
+				reverseGoogleFile(fileToReverse, reversedfile)
 				fileToSort = reversedfile
-			else:	
-				fileToSort = combinedfile
+			elif direction == 'forwards':	
+				fileToSort = reorderedfile
 			
 			#sort it	
 			sortedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-sorted.txt')
@@ -581,23 +409,23 @@ def analyzeCorpus(corpusSpecification):
 	lexSurpDir, sublexSurpDir, correlationsDir, processedDir = makeDirectoryStructure(corpusSpecification['faststoragedir'], corpusSpecification['slowstoragedir'], corpusSpecification['analysisname'], corpusSpecification['corpus'], corpusSpecification['language'], int(corpusSpecification['order']))	
 	
 	if (corpus == 'GoogleBooks2012'):
-		if (language in ('eng-all', 'spa-all', 'fre-all','ger-all','test')):					
+		if (language in ('eng-all', 'spa-all', 'fre-all','ger-all','rus-all','test','heb-all')):					
 			print('Checking if input files exist...')			
 			
 			print('Building language models...')
 			# get backwards-indexed model of highest order (n)
-			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='gz')
+			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), direction='backwards', collapseyears=True, filetype='gz')
 			# get forwards-indexed model of order n-1 (text file  built as a consequence)
-			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='gz')				
+			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, direction='forwards', collapseyears=True, filetype='gz')				
 		else:
 			raise NotImplementedError		
 	elif(corpus == 'Google1T'):
 		if (language in ('SPANISH','FRENCH','DUTCH','GERMAN','SWEDISH','CZECH','ROMANIAN','POLISH','PORTUGUESE','ITALIAN')):
-			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='bz2')
-			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='bz2')
+			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), direction="backwards", collapseyears=True, filetype='bz2')
+			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, direction="forwards", collapseyears=True, filetype='bz2')
 		elif language in ('ENGLISH'):
-			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), reverse=True, collapseyears=True, filetype='gz')
-			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, reverse=False, collapseyears=True, filetype='gz')
+			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), direction='backwards', collapseyears=True, filetype='gz')
+			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, direction='forwards', collapseyears=True, filetype='gz')
 
 	elif(corpus == 'BNC'):
 		if (language == 'eng'):
@@ -609,12 +437,12 @@ def analyzeCorpus(corpusSpecification):
 					
 			print('Building language models')
 			# get backwards-indexed model of highest order (n)
-			getPlaintextLanguageModel(corpusSpecification, n, reverse=True, cleaningFunction='cleanLine_BNC')
+			getPlaintextLanguageModel(corpusSpecification, n, direction='backwards', cleaningFunction='cleanLine_BNC')
 			# get forwards-indexed model of order n-1 (text file  built as a consequence)
-			getPlaintextLanguageModel(corpusSpecification, n-1, reverse=False, cleaningFunction='cleanLine_BNC')
+			getPlaintextLanguageModel(corpusSpecification, n-1, direction='forwards', cleaningFunction='cleanLine_BNC')
 			#get unigrams to be able to take top N words in the analysis
 			if n > 2:
-				getPlaintextLanguageModel(corpusSpecification, 1, reverse=False, cleaningFunction='cleanLine_BNC')
+				getPlaintextLanguageModel(corpusSpecification, 1, direction='forwards', cleaningFunction='cleanLine_BNC')
 		else:
 			raise NotImplementedError	
 	
@@ -654,11 +482,10 @@ def analyzeCorpus(corpusSpecification):
 	#!!! do the analysis in R?
 	
 
-def getPlaintextLanguageModel(corpusSpecification, n, reverse, cleaningFunction):	
+def getPlaintextLanguageModel(corpusSpecification, n, direction, cleaningFunction):	
 	'''This metafunction produces a ZS language model from a large plaintext document using the program "ngrams" from the AutoCorpus Debian package to count the n-gram frequencies for a specified order (n). Example use: for producing a ZS file from the BNC.'''
 	startTime = time.time()
-	lexSurpDir = os.path.join(corpusSpecification['faststoragedir'], corpusSpecification['analysisname'],corpusSpecification['corpus'],corpusSpecification['language'],'00_lexicalSurprisal')
-	direction = 'backwards' if reverse else 'forwards'
+	lexSurpDir = os.path.join(corpusSpecification['faststoragedir'], corpusSpecification['analysisname'],corpusSpecification['corpus'],corpusSpecification['language'],'00_lexicalSurprisal')	
 
 	zs_metadata = { 
 	"corpus": corpusSpecification['corpus'],
@@ -681,7 +508,7 @@ def getPlaintextLanguageModel(corpusSpecification, n, reverse, cleaningFunction)
 
 	cleanTextFile(inputfile, cleanedFile, cleaningFunction)
 	countNgrams(cleanedFile, countedFile)
-	rearrangeNgramFile(countedFile, countMovedFile, reverse)
+	rearrangeNgramFile(countedFile, countMovedFile, direction)
 	sortNgramFile(countMovedFile, sortedFile)
 	os.system ("cp "+sortedFile+" "+collapsedFile) #this just copies it, so filenames are equivalent to the google procedure
 	makeLanguageModel(collapsedFile, zsFile, metadata, 'none')
@@ -689,7 +516,7 @@ def getPlaintextLanguageModel(corpusSpecification, n, reverse, cleaningFunction)
 	print('Done! Completed file is at '+zsFile+'; elapsed time is '+str(round(time.time()-startTime, 5))+' seconds') 
 
 
-def rearrangeNgramFile(inputfile, outputfile, reverse):
+def rearrangeNgramFile(inputfile, outputfile, direction):
 	print('Rearranging the ngrams...')
 	iff = codecs.open(inputfile, 'r', encoding='utf-8')
 	off = codecs.open(outputfile, 'w', encoding='utf-8')	
@@ -699,11 +526,11 @@ def rearrangeNgramFile(inputfile, outputfile, reverse):
 		if (len(strArray) == 1):
 			continue
 		else:		
-			if reverse:
+			if direction == 'backwards':
 				count = strArray.pop(0)
 				strArray.reverse()
 				strArray.append(count) #move the count to the end, reverse ngram	
-			else:	
+			elif direction == 'forwards':	
 				strArray.append(strArray.pop(0)) #just move the count to the end
 			off.write('\t'.join(strArray)+'\n')
 	iff.close()
@@ -897,9 +724,13 @@ def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
 		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir = sublexLMfileDir)	
 		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
 	elif column == 'ipa':		
+		
 		#get the IPA representation from espeak
 		if language == u'en':
 			espeak_lang = u'en-US'
+		elif language == u'he':
+			print 'No hebrew support for Espeak, returning None for IPA'
+			return None
 		else:
 			espeak_lang = language	
 
