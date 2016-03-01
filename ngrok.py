@@ -43,7 +43,7 @@ def cleanGoogleDirectory(inputdir, outputdir, collapseyears, order):
 		procs.append(p)
 		p.start()
 	              
-	files = glob.glob(os.path.join(inputdir,'*.gz')) 
+	files = glob.glob(os.path.join(inputdir,'*.gz')) + glob.glob(os.path.join(inputdir,'*.zip')) 
 	if len(files) > 0:
 		print('File type is gz')	
 		filetype = 'gz'
@@ -89,6 +89,11 @@ def collapseNgrams(inputfile, outputfile):
 
 	lineSplit = firstLine.split('\t')
 	prev_ngram = lineSplit[0]
+
+	if len(lineSplit) == 5:		
+		print('5 tab-delineated columns, assuming first is the ngram, second is the year, third is the token, and the fourth the context count')
+		ncols = 5
+		cached_count = int(lineSplit[2])
 	if len(lineSplit) == 4:		
 		print('4 tab-delineated columns, assuming first is the ngram, second is the year, third is the token, and the fourth the context count')
 		ncols = 4
@@ -104,11 +109,12 @@ def collapseNgrams(inputfile, outputfile):
 		line = l.split('\t')		
 		if len(line) != ncols:
 			print 'Mismatch in line length and ncols, line was '+line[0]
-			break
+			continue
+
 		ngram = line[0]
 		if ncols == 2:
 			count = int(line[1]) #second column is the token count		
-		elif ncols == 4:
+		elif ncols in (4,5) :
 			count = int(line[2]) #third column is the token count	
 				
 		if(ngram != prev_ngram): #new ngram, write out the cached one			
@@ -138,10 +144,11 @@ def cleanGoogle(inputfile, outputfile, collapseyears, filetype, order):
 	if collapseyears:		
 		tempfile1 = inputfile+'_temp1'
 		
-		if filetype == 'gz':
+		if filetype in ('gz', 'csv.zip'):
 			cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile1
 		elif filetype == 'bz2':
 			cleanGoogleCommand = "bzcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile1	
+		
 		os.system(cleanGoogleCommand)
 		if os.stat(tempfile1).st_size > 0 :	
 			collapseNgrams(tempfile1, tempfile0) # this means that there are separate records for lowercase and uppercase items
@@ -150,10 +157,10 @@ def cleanGoogle(inputfile, outputfile, collapseyears, filetype, order):
 			'Temp file has no content; safe to remove.'	
 		os.remove(tempfile1)
 	else:	
-		if filetype == 'gz':
+		if filetype in ('gz', 'csv.zip'):
 			cleanGoogleCommand = "zcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile0
 		elif filetype == 'bz2':
-			cleanGoogleCommand = "bzcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile0
+			cleanGoogleCommand = "bzcat "+inputfile+" | LC_ALL=C grep -v '[]_,.!\"#$%&()*+-/:;<>=@^{|}~[]' | perl -CSD -ne 'print lc' > "+tempfile		
 		os.system(cleanGoogleCommand)
 
 	fixPunctuation(tempfile0, outputfile, order)	#remove the punctuation
@@ -318,14 +325,14 @@ def getGoogleBooksLanguageModel(corpusSpecification, n, direction, collapseyears
 			outputdir = os.path.join(corpusSpecification['slowstoragedir'],corpusSpecification['analysisname'], corpusSpecification['corpus'],corpusSpecification['language'],str(n)+'-processed')	
 		
 			combinedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-combined.txt')				
-			if collapseyears:
+			if collapseyears:				
 				cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.yc')	
 				if cleanFileProp < .2:
 					cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
 					checkForMissingFiles(inputdir, '*.'+ filetype, outputdir, '*.yc')	
 				combineFiles(outputdir, '*.yc', combinedfile)	
 
-			else:	
+			else:					
 				cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.output')
 				if cleanFileProp < .2:
 					cleanGoogleDirectory(inputdir,outputdir, collapseyears, n)
@@ -426,6 +433,18 @@ def analyzeCorpus(corpusSpecification):
 		elif language in ('ENGLISH'):
 			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), direction='backwards', collapseyears=True, filetype='gz')
 			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, direction='forwards', collapseyears=True, filetype='gz')
+	if (corpus == 'GoogleBooks2009'):
+		if (language in ('eng-all')):					
+			print('Checking if input files exist...')			
+			
+			print('Building language models...')
+			# get backwards-indexed model of highest order (n)
+			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), direction='backwards', collapseyears=True, filetype='csv.zip')
+			# get forwards-indexed model of order n-1 (text file  built as a consequence)
+			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, direction='forwards', collapseyears=True, filetype='csv.zip')				
+		else:
+			raise NotImplementedError		
+
 
 	elif(corpus == 'BNC'):
 		if (language == 'eng'):
@@ -447,35 +466,34 @@ def analyzeCorpus(corpusSpecification):
 			raise NotImplementedError	
 	
 	#to use most frequent words from Google for the sublexical surprisal model
-	#forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
-	#unigramCountFilePath = corpusSpecification['wordlist'] -- if this were included with marginalization, we would overwrite the OPUS file	 (not good!)
-	#unigramCountFilePath = os.path.join(lexSurpDir, 'unigram_list.txt')
-	#marginalizeNgramFile(forwardBigramPath, unigramCountFilePath, 1, 'numeric') 	
+	forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
+	unigramCountFilePath = os.path.join(lexSurpDir, 'unigram_list.txt')
+	marginalizeNgramFile(forwardBigramPath, unigramCountFilePath, 1, 'numeric') 	
 
 	#to use OPUS for the sublexical surprisal model:
-	unigramCountFilePath = corpusSpecification['wordlist']	
+	#unigramCountFilePath = corpusSpecification['wordlist']	
 
 	print('Getting mean lexical surprisal estimates for types in the langauge...')
 	forwardsNminus1txt = os.path.join(lexSurpDir,str(int(n)-1)+'gram-forwards-collapsed.txt')
 
-	lexfile = os.path.join(lexSurpDir, 'opus_meanSurprisal25k.csv')	
-	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['wordlist'], 0,lexfile)	
+	lexfile = os.path.join(lexSurpDir, 'opus_meanSurprisal.csv')	
+	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['wordlist'], 0,lexfile, corpusSpecification['country_code'])	
 
-	numberOfTypesInModel = 25000
+	numberOfTypesInModel = 50000
 	sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sublex.csv')
 	print('Getting sublexical surprisal estimates for types in the language, using IPA...')	
 	
-	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'ipa', numberOfTypesInModel, corpusSpecification['country_code'])
+	addSublexicalSurprisals(lexfile, sublexFilePath, 'ipa', numberOfTypesInModel, corpusSpecification['country_code'])
 	#second argument is the file to augment
 
 	print('Getting sublexical surprisal estimates for types in the language, using orthography...')		
-	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'ortho', numberOfTypesInModel, corpusSpecification['country_code'])
+	addSublexicalSurprisals(lexfile, sublexFilePath, 'ortho', numberOfTypesInModel, corpusSpecification['country_code'])
 	
 	print('Getting sublexical surprisal estimates for types in the language, using SAMPA...')	
-	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'sampa', numberOfTypesInModel, corpusSpecification['country_code'])
+	addSublexicalSurprisals(lexfile, sublexFilePath, 'sampa', numberOfTypesInModel, corpusSpecification['country_code'])
 
 	print('Getting sublexical surprisal estimate for types in the language, building it over the characters')
-	addSublexicalSurprisals(unigramCountFilePath, sublexFilePath, 'character', numberOfTypesInModel, corpusSpecification['country_code'])
+	addSublexicalSurprisals(lexfile, sublexFilePath, 'character', numberOfTypesInModel, corpusSpecification['country_code'])
 
 	#opus_meanSurprisal25k_sublex.csv')
 	#analyzeSurprisalCorrelations(lexfile, ipa_sublexFilePath, corpusSpecification['wordlist'], outfile)
@@ -629,10 +647,10 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 
 
 
-def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wordlist_csv, cutoff, outputfile):		
+def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wordlist_csv, cutoff, outputfile, language):		
 	start_time = time.time()
 	'''producing mean surprisal estimates given a backwards n-gram language model and a forwards text file (to be read into a hash table) for order n-1. Produces mean information content (mean log probability, weighted by the frequency of each context) as well as sublexical surprisal using Kneser-Ney smoothing on a list of words from an externally-provided wordlist (e.g. top 25k most frequent words in the corpus that are also in OPUS or Switchboard).'''
-	
+
 	print('Loading the backwards ZS file for order n...')
 	backward_zs = ZS(backwards_zs_path, parallelism=0)
 
@@ -651,13 +669,30 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wor
 
 	print('Loading unigram file...')		
 	uni_sorted_file = pandas.read_table(unigram_txt_path, encoding='utf-8')
-	top_words = uni_sorted_file['word']	
+	uni_sorted_file.columns = ['uni_count','word']	
 
 	print('Loading OPUS file...')		
 	wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8', keep_default_na=False, na_values=[])
-	wordlist = wordlist_DF['word'].tolist()
+	wordlist_DF.columns = ['opus_count','word']
+
+	#filter with some Aspell rules
+	#aspellLang = language
+	#if aspellLang == 'pt':
+	#	aspellLang = 'pt-BR'
+	#wordList_DF['count']		
 	
-	frequent_words = [w for w in top_words[0:200000] if w in wordlist][:25000]	
+	#speller = aspell.Speller(('lang',aspellLang),('encoding','utf-8'))
+	#wordlist_DF['aspell_upper'] = [speller.check(x.title().encode('utf-8')) == 1 for x in wordlist_DF['word']]
+	#wordlist_DF['aspell_lower'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in wordlist_DF['word']]
+
+	#keep a form if it exists in the dictionary for the langauge—either as a proper noun or not
+	#wordlist_DF = wordlist_DF[wordlist_DF['aspell_upper'] | wordlist_DF['aspell_lower']]
+
+	#merge wordlist against the uni_sorted file
+	merged = wordlist_DF.merge(uni_sorted_file, left_on='word', right_on='word').sort_values(by=['uni_count'], ascending=False)
+
+	frequent_words = merged['word'].tolist()[0:50000]
+
 	print('Retrieving lexical surprisal estimates...')
 	surprisalEstimates = [get_mean_surp(bigrams, backward_zs, w, cutoff) for w in frequent_words]
 
@@ -710,9 +745,11 @@ def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
 	''' 
 	print('Retrieving sublexical surprisal estimates...')
 	
-	lex = pandas.read_table(lexiconfile, encoding='utf-8').dropna()	
-	if n != -1:
-		lex = lex.iloc[0:min(n*1.2,len(lex)-1)] #take some padding because some will be thrown out with later filters		
+	filename, file_extension = os.path.splitext(lexiconfile)
+	if(file_extension=='.txt'):
+		lex = pandas.read_table(lexiconfile, encoding='utf-8').dropna()	
+	elif(file_extension=='.csv'):
+		lex = pandas.read_csv(lexiconfile, encoding='utf-8').dropna()		
 
 	sublexLMfileDir = os.path.join(os.path.dirname(augmentfile), column)
 	if not os.path.exists(sublexLMfileDir):
@@ -757,6 +794,8 @@ def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
 		pm['sampa'] = [x.split(' ') for x in pm['sampa']]
 		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir= sublexLMfileDir)	
 		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
+	else:
+		raise ValueError('Acceptable column types are sampa, character, and ortho')	
 	
 	
 	pm[column+'_ss'] = [sum(x) if x is not None else 0 for x in pm[column+'_ss_array']]	
@@ -765,7 +804,11 @@ def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
 	#add the new results to the augmentfile and write it out
 	if os.path.exists(augmentfile):
 		aug = pandas.read_csv(augmentfile, encoding='utf-8').dropna()	
-		aug.merge(pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']], left_on="word", right_on="word").to_csv(augmentfile, index=False, encoding='utf-8')
+		if column in aug.columns:
+			#columns already exist in the file, so we want to overwrite it
+			pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']].to_csv(augmentfile, index=False, encoding='utf-8')			
+		else:				
+			aug.merge(pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']], left_on="word", right_on="word").to_csv(augmentfile, index=False, encoding='utf-8')
 	else: 
 		pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']].to_csv(augmentfile, index=False, encoding='utf-8')			
 	print('Done!')
@@ -929,6 +972,8 @@ def downloadCorpus(language, order, inputdir, release):
 				if not os.path.exists(language+"/"+n+"/"+filename):
 					print "# Downloading %s to %s" % (url, language+"/"+n+"/"+filename)
 					urllib.urlretrieve(url, language+"/"+n+"/"+filename )
+				else:
+					print('File already exists')	
 				print "opening url:", url
 				site = urllib.urlopen(url)
 				meta = site.info()
@@ -937,7 +982,7 @@ def downloadCorpus(language, order, inputdir, release):
 					print("error: "+filename)
 				sys.stdout.flush()
 	os.chdir(old_cwd)
-	print("It took " + str(datetime.now() - startTime))
+	print("It took " + str(datetime.now() - start_time))
 
 def downloadCorpusWrapper(corpusSpecification):
 	downloadCorpus(corpusSpecification['language'], corpusSpecification['order'],corpusSpecification['inputdir'])
@@ -991,20 +1036,18 @@ def validateCorpus(corpusSpecification):
 def cleanString(string): 
 		return(''.join(e for e in string if e.isalpha() or e in ("'") or e.isspace()))	
 
-def cleanUnigramCountFile(inputfile, outputfile, n, language):	
+def cleanUnigramCountFile(inputfile, outputfile, n, language, filterByDictionary):	
 	'''filter the unigram count file, and reduce the number of items in it'''	
+
 	df = pandas.read_table(inputfile, encoding='utf-8')	
 	df.columns = ['word','count']
 	#take some multiple of items to run the filters on
 	
 	#discard purely numeric items
-	df_nonnumeric = df[[type(x) is unicode for x in df['word']]]
+	df_nonnumeric = df[[type(x) is unicode for x in df['word']]]	
 
-	#retain only lower-case items
-	df_lower = df_nonnumeric[[x == x.lower() for x in df_nonnumeric['word']]]
-	
 	#discard the <s> string
-	df_clean = df_lower[[x != u'</s>' for x in df_lower['word']]]
+	df_clean = df_nonnumeric[[x != u'</s>' for x in df_nonnumeric['word']]]
 
 	#delete apostrophes, numbers
 	df_clean['word'] = [re.sub(u"’|'|\d",'',x) for x in df_clean['word']]
@@ -1014,16 +1057,24 @@ def cleanUnigramCountFile(inputfile, outputfile, n, language):
 	
 	df_clean['word'] = [cleanString(x) for x in df_clean['word']] 
 
+	#check whether the upper and lower case is in the dictionary
 	aspellLang = language
 	if aspellLang == 'pt':
 		aspellLang = 'pt-BR'
 	speller = aspell.Speller(('lang',aspellLang),('encoding','utf-8'))
-	df_clean['aspell'] = [speller.check(x.encode('utf-8')) == 1 for x in df_clean['word']]
+	df_clean['aspell_upper'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in df_clean['word']]
+	df_clean['aspell_lower'] = [speller.check(x.title().encode('utf-8')) == 1 for x in df_clean['word']]
+	
+	#Convert anything that can be lower case to lower case
+	df_clean['word'][df_clean['aspell_lower']] = [x.lower() for x in df_clean['word'][df_clean['aspell_lower']]]
 
-	#check the rejected words
-	#df_clean.ix[~df_clean['aspell']]	
-	to_write = df_clean.ix[df_clean['aspell']]
-	to_write = to_write.drop('aspell', axis=1)
+	if filterByDictionary:
+		#check the rejected words
+		#df_clean.ix[~df_clean['aspell']]	
+		df_clean = df_clean.ix[df_clean['aspell_lower']]		
+
+	to_write = df_clean.drop(['aspell_lower','aspell_upper'], axis=1)
+	to_write['word'] = [x.lower() for x in to_write['word']]
 	to_write.to_csv(outputfile, sep='\t', index=False, header=False, encoding='utf-8')
 	print('Wrote to file: '+outputfile)
 
@@ -1061,7 +1112,7 @@ def fixPunctuation(inputfile, outputfile, order):
 		line = l.split('\t')
 		if len(line) != ncols:			
 			print 'Mismatch in line length and ncols, line was '+line
-			break
+			continue
 		ngram = line[0]
 		ngram_split = [x for x in ngram.split(' ') if x != u"'" and x != u'']
 		if len(ngram_split) != order:

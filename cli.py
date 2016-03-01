@@ -152,9 +152,10 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 @click.option('--wordlist_csv', type=click.Path(), help="Filename of the wordlist CSV to check against; words should be in the first column", required=True)
 @click.option('--cutoff', type=int, default=0, help="Discard ngrams from highest order model with frequency < n", required=True)
 @click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
-def getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cutoff, outputfile):
+@click.option('--language', type=str, help="2-letter language code", required=True)
+def getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cutoff, outputfile, language):
 	'''Compute mean surprisal / information content for a list of words'''
-	ngrok.getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cutoff, outputfile)	
+	ngrok.getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cutoff, outputfile, language)	
 
 #addSublexicalSurprisals
 @cli.command() 
@@ -192,8 +193,9 @@ def checkForMissingFiles(directory1, pattern1, directory2, pattern2):
 @click.option('--language', type=str, help="Name of the language to download", required=True)
 @click.option('--order', type=int, help="order of ngrams to download", required=True)
 @click.option('--inputdir', type=click.Path(), help="path of where to write the downloaded ngram files")
-def downloadCorpus(language, order, inputdir):
-	ngrok.downloadCorpus(language, order, inputdir)
+@click.option('--release', type=str, help="Name of the release, e.g. 20090715", required=True)
+def downloadCorpus(language, order, inputdir, release):
+	ngrok.downloadCorpus(language, order, inputdir, release)
 
 #cleanUnigramCountFile
 @cli.command() 
@@ -202,9 +204,10 @@ def downloadCorpus(language, order, inputdir):
 @click.option('--n', type=int, help='The top n words to retain', 
 	required=True)
 @click.option('--language', type=str, help='The name of the for the aspell dictionary', required=True)
-def cleanUnigramCountFile(inputfile, outputfile, n):
+@click.option('--filterbydictionary', type=bool, help="should only lower-case words found in the dictionary be returned?", required=True)
+def cleanUnigramCountFile(inputfile, outputfile, n, language, filterbydictionary):
 	'''Filter the unigram count file, and reduce the number of items in it.'''
-	ngrok.cleanUnigramCountFile(inputfile, outputfile, n)
+	ngrok.cleanUnigramCountFile(inputfile, outputfile, n, language, filterbydictionary)
 
 #fixPunctuation
 @cli.command() 
