@@ -448,26 +448,25 @@ def analyzeCorpus(corpusSpecification):
 
 	elif(corpus == 'BNC'):
 		if (language == 'eng'):
-			
+
 			print('Checking if input files exist...')
 			#!!! check if file extant; if not, then download
 
-			#!!! does buildZSfromPlaintext.py preserve unicode?
-					
+			#!!! does buildZSfromPlaintext.py preserve unicode?	
 			print('Building language models')
 			# get backwards-indexed model of highest order (n)
-			getPlaintextLanguageModel(corpusSpecification, n, direction='backwards', cleaningFunction='cleanLine_BNC')
+			backwardsNmodel = getPlaintextLanguageModel(corpusSpecification, n, direction='backwards', cleaningFunction='cleanLine_BNC')
 			# get forwards-indexed model of order n-1 (text file  built as a consequence)
-			getPlaintextLanguageModel(corpusSpecification, n-1, direction='forwards', cleaningFunction='cleanLine_BNC')
+			forwardsNminus1model = getPlaintextLanguageModel(corpusSpecification, int(n)-1, direction='forwards', cleaningFunction='cleanLine_BNC')
 			#get unigrams to be able to take top N words in the analysis
-			if n > 2:
-				getPlaintextLanguageModel(corpusSpecification, 1, direction='forwards', cleaningFunction='cleanLine_BNC')
+			
 		else:
 			raise NotImplementedError	
 	
 	#to use most frequent words from Google for the sublexical surprisal model
 	forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
 	unigramCountFilePath = os.path.join(lexSurpDir, 'unigram_list.txt')
+
 	marginalizeNgramFile(forwardBigramPath, unigramCountFilePath, 1, 'numeric') 	
 
 	#to use OPUS for the sublexical surprisal model:
@@ -515,8 +514,8 @@ def getPlaintextLanguageModel(corpusSpecification, n, direction, cleaningFunctio
 	
 	tbl = dict.fromkeys(i for i in xrange(sys.maxunicode)
 	if unicodedata.category(unichr(i)).startswith('P'))
-
-	inputfile = os.path.join(scorpusSpecification['lowStorageDir'],corpusSpecification['corpus'],corpusSpecification['language'],str(n),{})
+	
+	inputfile = os.path.join(corpusSpecification['inputdir'],corpusSpecification['corpus'],corpusSpecification['language'],corpusSpecification['filename'])
 	cleanedFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'-cleaned.txt')
 	countedFile= os.path.join(lexSurpDir,str(n)+'gram-'+direction+'-counted.txt')
 	countMovedFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'-countMoved.txt')
@@ -525,31 +524,31 @@ def getPlaintextLanguageModel(corpusSpecification, n, direction, cleaningFunctio
 	zsFile = os.path.join(lexSurpDir,str(n)+'gram-'+direction+'.zs')	
 
 	cleanTextFile(inputfile, cleanedFile, cleaningFunction)
-	countNgrams(cleanedFile, countedFile)
+	countNgrams(cleanedFile, countedFile, n)
 	rearrangeNgramFile(countedFile, countMovedFile, direction)
 	sortNgramFile(countMovedFile, sortedFile)
 	os.system ("cp "+sortedFile+" "+collapsedFile) #this just copies it, so filenames are equivalent to the google procedure
-	makeLanguageModel(collapsedFile, zsFile, metadata, 'none')
+	makeLanguageModel(collapsedFile, zsFile, zs_metadata, 'none')
 
 	print('Done! Completed file is at '+zsFile+'; elapsed time is '+str(round(time.time()-startTime, 5))+' seconds') 
+	return(zsFile)
 
-
-def rearrangeNgramFile(inputfile, outputfile, direction):
-	print('Rearranging the ngrams...')
+def rearrangeNgramFile(inputfile, outputfile, direction):	
+	print('Rearranging the ngrams...')	
 	iff = codecs.open(inputfile, 'r', encoding='utf-8')
 	off = codecs.open(outputfile, 'w', encoding='utf-8')	
 	for l in iff:		
-		l = l.replace('\n','').replace(' ','\t')
+		l = l.replace('\n','')
 		strArray = l.split('\t')
 		if (len(strArray) == 1):
 			continue
-		else:		
+		else:	
+			count = strArray.pop(0)	
+			ngram = strArray[0].split(' ')
 			if direction == 'backwards':
-				count = strArray.pop(0)
-				strArray.reverse()
-				strArray.append(count) #move the count to the end, reverse ngram	
-			elif direction == 'forwards':	
-				strArray.append(strArray.pop(0)) #just move the count to the end
+				ngram.reverse()
+			strArray = [' '.join(ngram)]
+			strArray.append(count) #move the count to the end, reverse ngram				
 			off.write('\t'.join(strArray)+'\n')
 	iff.close()
 	off.close()
@@ -632,15 +631,20 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 	'''Cleans a plaintext file line by line with the function specified in cleaningFunction'''
 	print('Cleaning the plaintext file...')
 
+	tbl = dict.fromkeys(i for i in xrange(sys.maxunicode)
+                      if unicodedata.category(unichr(i)).startswith('P'))
+	tbl.pop(ord(u"'")) #remove apostrophe from the list of punctuation
+
 	def cleanLine_BNC(l):
-		return remove_punctuation(l.lower().decode('utf-8')).encode('utf-8')
+		return remove_punctuation(l.lower(), tbl)
 	cleanLineOptions = {'cleanLine_BNC': cleanLine_BNC}
+
 
 	iff = codecs.open(inputfile, 'r', encoding='utf-8')
 	off = codecs.open(outputfile, 'w', encoding='utf-8')	
 
 	for line in iff:		
-		off.write(cleanLineOptions['cleaningFunction'](line))
+		off.write(cleanLineOptions[cleaningFunction](line))
 
 	iff.close()
 	off.close()
