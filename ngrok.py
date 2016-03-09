@@ -690,7 +690,7 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wor
 	#wordlist_DF['aspell_lower'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in wordlist_DF['word']]
 
 	#keep a form if it exists in the dictionary for the langauge—either as a proper noun or not
-	#wordlist_DF = wordlist_DF[wordlist_DF['aspell_upper'] | wordlist_DF['aspell_lower']]
+	#wordlist_DF = wordlist_DF[wordlist_DF['aspell_upper'] | wordlist_DF['d_lower']]
 
 	#merge wordlist against the uni_sorted file
 	merged = wordlist_DF.merge(uni_sorted_file, left_on='word', right_on='word').sort_values(by=['uni_count'], ascending=False)
@@ -724,14 +724,14 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 			num_context += 1
 			if context in bigrams_dict:
 				total_context_freq = bigrams_dict[context]
+				cond_prob = math.log(count / float(total_context_freq))
+				#print cond_prob
+				surprisal_total += (count * cond_prob) #this is weighted by the frequency of this context
+				unweightedSurprisal +=  cond_prob #this is not
 			else:
-				#raise ValueError('Missing context: '+ context) 
-				pdb.set_trace()
-				#there should not be any missing values
-			cond_prob = math.log(count / float(total_context_freq))
-			#print cond_prob
-			surprisal_total += (count * cond_prob) #this is weighted by the frequency of this context
-			unweightedSurprisal +=  cond_prob #this is not
+				print('Missing context: '+ context) 
+				#pdb.set_trace()
+				#there should not be any missing values			
 		else:
 			continue	
 	stop_time = time.time()
@@ -751,9 +751,9 @@ def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
 	
 	filename, file_extension = os.path.splitext(lexiconfile)
 	if(file_extension=='.txt'):
-		lex = pandas.read_table(lexiconfile, encoding='utf-8').dropna()	
+		lex = pandas.read_table(lexiconfile, encoding='utf-8').dropna().head(n)
 	elif(file_extension=='.csv'):
-		lex = pandas.read_csv(lexiconfile, encoding='utf-8').dropna()		
+		lex = pandas.read_csv(lexiconfile, encoding='utf-8').dropna().head(n)		
 
 	sublexLMfileDir = os.path.join(os.path.dirname(augmentfile), column)
 	if not os.path.exists(sublexLMfileDir):
@@ -770,7 +770,7 @@ def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
 		if language == u'en':
 			espeak_lang = u'en-US'
 		elif language == u'he':
-			print 'No hebrew support for Espeak, returning None for IPA'
+			print 'No Hebrew support for Espeak, returning None for IPA'
 			return None
 		else:
 			espeak_lang = language	
