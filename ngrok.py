@@ -474,9 +474,24 @@ def analyzeCorpus(corpusSpecification):
 
 	print('Getting mean lexical surprisal estimates for types in the langauge...')
 	forwardsNminus1txt = os.path.join(lexSurpDir,str(int(n)-1)+'gram-forwards-collapsed.txt')
+		
+	df = getWordList(corpusSpecification) 
+	pdb.set_trace()
+	#print('Loading unigram file...')		
+	#uni_sorted_file = pandas.read_table(unigram_txt_path, encoding='utf-8')
+	#uni_sorted_file.columns = ['uni_count','word']	
+
+	#print('Loading OPUS file...')		
+	#wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8', keep_default_na=False, na_values=[])
+	#wordlist_DF.columns = ['opus_count','word']	
+
+	#keep a form if it exists in the dictionary for the langauge—either as a proper noun or not
+	#wordlist_DF = wordlist_DF[wordlist_DF['aspell_upper'] | wordlist_DF['d_lower']]
 
 	lexfile = os.path.join(lexSurpDir, 'opus_meanSurprisal.csv')	
-	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['wordlist'], 0,lexfile, corpusSpecification['country_code'])	
+	
+	#!!! make sure that 50k
+	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['retrievallist'], 0,lexfile, corpusSpecification['country_code'])	
 
 	numberOfTypesInModel = 50000
 	sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sublex.csv')
@@ -498,6 +513,58 @@ def analyzeCorpus(corpusSpecification):
 	#analyzeSurprisalCorrelations(lexfile, ipa_sublexFilePath, corpusSpecification['wordlist'], outfile)
 	#!!! do the analysis in R?
 	
+
+def getWordList(params):
+	 	retrieval_list = pandas.read_table(params['retrievallist'], encoding='utf-8')
+	 	#!!! this should have columns names on read in, including word and frequency or count
+	 	if 'word' not in retrieval_list.columns:
+	 		raise ValueError('Retrieval list must have a word column')
+	 	
+	 	if 'frequency' not in retrieval_list.columns and 'count' not in retrieval_list.columns:
+	 		raise ValueError('Retrieval list must have a frequency or count column')
+	 	
+	 	# rename the retrieval list column for count to frequency	
+	 	if 'count' in retrieval_list.columns:
+	 		#retrievallist.columns #!!! must rename
+	 		retrieval_list.rename(columns={'count': 'frequency'}, inplace=True)
+
+	 	# Subset to Filter List
+	 	filter_list = pandas.read_table(params['filterlist'], encoding='utf-8')
+	 	
+	 	if 'word' not in filter_list.columns:
+	 		raise ValueError('Filter list must have a word column for filtering')	
+
+		df = filter_list[['word']].merge(retrieval_list).sort_values(by = ['frequency'], ascending=False)
+		df.word = df.word.astype("unicode")
+
+		# Dictionary Filtering
+		if params['inDictionaryOnly']:
+			print('Filtering with dictionary')	 		
+			aspellLang = params['country_code']
+			if aspellLang == 'pt':
+				aspellLang = 'pt-BR' #use Brazilian Portuguese for spelling
+		
+			speller = aspell.Speller(('lang',aspellLang),('encoding','utf-8'))
+			df['aspell_upper'] = [speller.check(x.title().encode('utf-8')) == 1 for x in df['word'].values]
+			df['aspell_lower'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in df['word'].values]
+			#!!! are these already filtered for spelling in OPUS?	
+			pdb.set_trace()
+
+			if params['country_code'] == 'German':
+				#in german all nouns are upper case, so we need to allow for them in the dictionary
+				df['aspell'] = df['aspell_lower'] | df['rm -r_upper'] 
+			else: 
+				df['aspell'] = df['aspell_lower']
+			df = df.loc[df['aspell']]	
+
+		# Limit the Number of Words	
+		if df.shape[0] > 2*params['n']:
+			rdf = df.head(2*params['n'])	#this should be enough 
+		else: 
+			rdf = df	
+		print('Filtered retrieval list has '+str(df.shape[0])+' items')
+	 	return(rdf) 
+
 
 def getPlaintextLanguageModel(corpusSpecification, n, direction, cleaningFunction):	
 	'''This metafunction produces a ZS language model from a large plaintext document using the program "ngrams" from the AutoCorpus Debian package to count the n-gram frequencies for a specified order (n). Example use: for producing a ZS file from the BNC.'''
@@ -670,27 +737,7 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wor
 			bigrams[key] = val
 		else:
 			pdb.set_trace()
-
-	print('Loading unigram file...')		
-	uni_sorted_file = pandas.read_table(unigram_txt_path, encoding='utf-8')
-	uni_sorted_file.columns = ['uni_count','word']	
-
-	print('Loading OPUS file...')		
-	wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8', keep_default_na=False, na_values=[])
-	wordlist_DF.columns = ['opus_count','word']
-
-	#filter with some Aspell rules
-	#aspellLang = language
-	#if aspellLang == 'pt':
-	#	aspellLang = 'pt-BR'
-	#wordList_DF['count']		
 	
-	#speller = aspell.Speller(('lang',aspellLang),('encoding','utf-8'))
-	#wordlist_DF['aspell_upper'] = [speller.check(x.title().encode('utf-8')) == 1 for x in wordlist_DF['word']]
-	#wordlist_DF['aspell_lower'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in wordlist_DF['word']]
-
-	#keep a form if it exists in the dictionary for the langauge—either as a proper noun or not
-	#wordlist_DF = wordlist_DF[wordlist_DF['aspell_upper'] | wordlist_DF['d_lower']]
 
 	#merge wordlist against the uni_sorted file
 	merged = wordlist_DF.merge(uni_sorted_file, left_on='word', right_on='word').sort_values(by=['uni_count'], ascending=False)
