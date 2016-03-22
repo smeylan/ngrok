@@ -446,8 +446,8 @@ def analyzeCorpus(corpusSpecification):
 			raise NotImplementedError		
 
 
-	elif(corpus == 'BNC'):
-		if (language == 'eng'):
+	elif(corpus in ('BNC', 'OPUS')):
+		if (language in ('en', 'ru', 'es','fr','de','he','eng-half','eng')):
 
 			print('Checking if input files exist...')
 			#!!! check if file extant; if not, then download
@@ -462,6 +462,8 @@ def analyzeCorpus(corpusSpecification):
 			
 		else:
 			raise NotImplementedError	
+	else:
+		raise NotImplementedError		
 	
 	#to use most frequent words from Google for the sublexical surprisal model
 	forwardBigramPath = os.path.join(lexSurpDir, '2gram-forwards-collapsed.txt')
