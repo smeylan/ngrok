@@ -7,9 +7,6 @@ from scipy import stats
 import joblib, multiprocessing
 from joblib import delayed, Parallel
 
-#ngrok library
-#!!! make sure that the CLI commands are updated
-
 class cgWorker(multiprocessing.Process):
     '''single-thread worker for parallelized cleanGoogle function'''  
     def __init__(self,queue,myList):
@@ -324,7 +321,8 @@ def getGoogleBooksLanguageModel(corpusSpecification, n, direction, collapseyears
 			inputdir = os.path.join(corpusSpecification['inputdir'],corpusSpecification['corpus'],corpusSpecification['language'],str(n))
 			outputdir = os.path.join(corpusSpecification['slowstoragedir'],corpusSpecification['analysisname'], corpusSpecification['corpus'],corpusSpecification['language'],str(n)+'-processed')	
 		
-			combinedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-combined.txt')				
+			combinedfile = os.path.join(intermediateFileDir,str(n)+'gram-'+direction+'-combined.txt')	
+
 			if collapseyears:				
 				cleanFileProp = checkForMissingFiles(inputdir, '*.'+filetype, outputdir, '*.yc')	
 				if cleanFileProp < .2:
@@ -415,6 +413,12 @@ def analyzeCorpus(corpusSpecification):
 
 	lexSurpDir, sublexSurpDir, correlationsDir, processedDir = makeDirectoryStructure(corpusSpecification['faststoragedir'], corpusSpecification['slowstoragedir'], corpusSpecification['analysisname'], corpusSpecification['corpus'], corpusSpecification['language'], int(corpusSpecification['order']))	
 	
+	#write model metadata in the form of a json of the corpusSpecification to the faststoragedir
+	with open(os.path.join(corpusSpecification['faststoragedir'],
+		corpusSpecification['analysisname'], corpusSpecification['corpus'], corpusSpecification['language'], 'model_details.json'), 'w') as outfile:
+		json.dump(corpusSpecification, outfile)
+	# read formatted version with cat model_details.json | python -m json.tool	
+
 	if (corpus == 'GoogleBooks2012'):
 		if (language in ('eng-all', 'spa-all', 'fre-all','ger-all','rus-all','test','heb-all')):					
 			print('Checking if input files exist...')			
@@ -433,7 +437,7 @@ def analyzeCorpus(corpusSpecification):
 		elif language in ('ENGLISH'):
 			backwardsNmodel = getGoogleBooksLanguageModel(corpusSpecification, int(n), direction='backwards', collapseyears=True, filetype='gz')
 			forwardsNminus1model = getGoogleBooksLanguageModel(corpusSpecification, int(n)-1, direction='forwards', collapseyears=True, filetype='gz')
-	if (corpus == 'GoogleBooks2009'):
+	elif(corpus == 'GoogleBooks2009'):
 		if (language in ('eng-all')):					
 			print('Checking if input files exist...')			
 			
@@ -447,7 +451,7 @@ def analyzeCorpus(corpusSpecification):
 
 
 	elif(corpus in ('BNC', 'OPUS')):
-		if (language in ('en', 'ru', 'es','fr','de','he','eng-half','eng')):
+		if (language in ('en', 'ru', 'es','fr','de','he','eng-half','eng','cs','pt', 'pl','ro','it','sv','nl')):
 
 			print('Checking if input files exist...')
 			#!!! check if file extant; if not, then download
@@ -463,6 +467,7 @@ def analyzeCorpus(corpusSpecification):
 		else:
 			raise NotImplementedError	
 	else:
+		pdb.set_trace()
 		raise NotImplementedError		
 	
 	#to use most frequent words from Google for the sublexical surprisal model
@@ -478,23 +483,25 @@ def analyzeCorpus(corpusSpecification):
 	forwardsNminus1txt = os.path.join(lexSurpDir,str(int(n)-1)+'gram-forwards-collapsed.txt')
 
 	lexfile = os.path.join(lexSurpDir, 'opus_meanSurprisal.csv')	
-	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, unigramCountFilePath,corpusSpecification['wordlist'], 0,lexfile, corpusSpecification['country_code'])	
 
-	numberOfTypesInModel = 50000
-	sublexFilePath = os.path.join(sublexSurpDir, str(numberOfTypesInModel)+'_sublex.csv')
-	print('Getting sublexical surprisal estimates for types in the language, using IPA...')	
-	
-	addSublexicalSurprisals(lexfile, sublexFilePath, 'ipa', numberOfTypesInModel, corpusSpecification['country_code'])
+	getMeanSurprisal(backwardsNmodel, forwardsNminus1txt, corpusSpecification['filterlist'],corpusSpecification['retrievallist'], 0,lexfile, corpusSpecification['country_code'], corpusSpecification['retrievalcount'], corpusSpecification['dictionary_filter'])	
+
+
+
+	sublexFilePath = os.path.join(sublexSurpDir, str(corpusSpecification['modelcount'])+'_sublex.csv')
+	print('Getting sublexical surprisal estimates for types in the language, using IPA...')
+
+	addSublexicalSurprisals(corpusSpecification['retrievallist'], corpusSpecification['retrievalcount'], corpusSpecification['modellist'], corpusSpecification['modelcount'], sublexFilePath, 'ipa', corpusSpecification['country_code'], corpusSpecification['dictionary_filter'] )
 	#second argument is the file to augment
 
 	print('Getting sublexical surprisal estimates for types in the language, using orthography...')		
-	addSublexicalSurprisals(lexfile, sublexFilePath, 'ortho', numberOfTypesInModel, corpusSpecification['country_code'])
+	addSublexicalSurprisals(corpusSpecification['retrievallist'], corpusSpecification['retrievalcount'], corpusSpecification['modellist'], corpusSpecification['modelcount'], sublexFilePath, 'ortho', corpusSpecification['country_code'], corpusSpecification['dictionary_filter'])
 	
-	print('Getting sublexical surprisal estimates for types in the language, using SAMPA...')	
-	addSublexicalSurprisals(lexfile, sublexFilePath, 'sampa', numberOfTypesInModel, corpusSpecification['country_code'])
+	# print('Getting sublexical surprisal estimates for types in the language, using SAMPA...')	
+	# addSublexicalSurprisals(corpusSpecification['retrievallist'], corpusSpecification['retrievalcount'], corpusSpecification['modellist'], corpusSpecification['modelcount'], sublexFilePath, 'sampa', corpusSpecification['country_code'])
 
 	print('Getting sublexical surprisal estimate for types in the language, building it over the characters')
-	addSublexicalSurprisals(lexfile, sublexFilePath, 'character', numberOfTypesInModel, corpusSpecification['country_code'])
+	addSublexicalSurprisals(corpusSpecification['retrievallist'], corpusSpecification['retrievalcount'], corpusSpecification['modellist'], corpusSpecification['modelcount'], sublexFilePath, 'character', corpusSpecification['country_code'], corpusSpecification['dictionary_filter'])
 
 	#opus_meanSurprisal25k_sublex.csv')
 	#analyzeSurprisalCorrelations(lexfile, ipa_sublexFilePath, corpusSpecification['wordlist'], outfile)
@@ -534,6 +541,16 @@ def getPlaintextLanguageModel(corpusSpecification, n, direction, cleaningFunctio
 
 	print('Done! Completed file is at '+zsFile+'; elapsed time is '+str(round(time.time()-startTime, 5))+' seconds') 
 	return(zsFile)
+
+
+def readCSVorTxt(filename): 
+	'''load a CSV or a TXT file without complaining'''
+	file_path, file_extension = os.path.splitext(filename)
+	if(file_extension=='.txt'):
+		df = pandas.read_table(filename, encoding='utf-8', keep_default_na=False, na_values=[]).dropna()
+	elif(file_extension=='.csv'):
+		df = pandas.read_csv(filename, encoding='utf-8', keep_default_na=False, na_values=[]).dropna()
+	return(df)
 
 def rearrangeNgramFile(inputfile, outputfile, direction):	
 	print('Rearranging the ngrams...')	
@@ -651,61 +668,101 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 	iff.close()
 	off.close()
 
-
-
-def getMeanSurprisal(backwards_zs_path, forwards_txt_path, unigram_txt_path, wordlist_csv, cutoff, outputfile, language):		
+def getMeanSurprisal(backwards_zs_path, forwards_txt_path, filter_file, retrieval_file, cutoff, outputfile, language, retrieval_count, dictionary_filter):		
 	start_time = time.time()
-	'''producing mean surprisal estimates given a backwards n-gram language model and a forwards text file (to be read into a hash table) for order n-1. Produces mean information content (mean log probability, weighted by the frequency of each context) as well as sublexical surprisal using Kneser-Ney smoothing on a list of words from an externally-provided wordlist (e.g. top 25k most frequent words in the corpus that are also in OPUS or Switchboard).'''
+	'''producing mean surprisal estimates given a backwards n-gram language model and a forwards text file (to be read into a hash table) for order n-1. Produces mean information content (mean log probability, weighted by the frequency of each context)'''
 
-	print('Loading the backwards ZS file for order n...')
-	backward_zs = ZS(backwards_zs_path, parallelism=0)
+	if os.path.exists(outputfile):
+		print('Using the existing lexical surprisal estimate')			
+	else:		
+		print('Loading the backwards ZS file for order n...')
+		backward_zs = ZS(backwards_zs_path, parallelism=0)
 
-	print('Loading the forwards hash table for order n-1...')
-	
-	bigrams = {}
-	f = codecs.open(forwards_txt_path, encoding='utf-8')
-	for line in f:
-		lineElements = line.split('\t')
-		if len(lineElements) > 1:			
-			key = lineElements[0]+u' ' 						
-			val = int(lineElements[1])
-			bigrams[key] = val
+		print('Loading the forwards hash table for order n-1...')
+		
+		bigrams = {}
+		f = codecs.open(forwards_txt_path, encoding='utf-8')
+		for line in f:
+			lineElements = line.split('\t')
+			if len(lineElements) > 1:			
+				key = lineElements[0]+u' ' 						
+				val = int(lineElements[1])
+				bigrams[key] = val
+			else:
+				pdb.set_trace()	
+
+		#!!! be careful with loading text vs. csv files	
+		print('Loading retrieval file...')	#use the column 'word', sort desceding by frequency or count
+		retrievalDF = readCSVorTxt(retrieval_file)
+		if 'word' not in retrievalDF.columns:
+			raise ValueError('Retrieval file must have "word" column')
+		if ('count' in retrievalDF.columns):
+			retrievalDF = retrievalDF.rename(columns={'count': 'retrieval_count'})
+		elif ('frequency' in filterDF.columns):
+			retrievalDF = retrievalDF.rename(columns={'frequency': 'retrieval_count'})
 		else:
-			pdb.set_trace()
+			raise ValueError('Filter file must contain "count" or "frequency" column')	
+		
+		print('Loading filter file...')	#use the column word	
+		if filter_file is not None:
+			filterDF = readCSVorTxt(filter_file)
 
-	print('Loading unigram file...')		
-	uni_sorted_file = pandas.read_table(unigram_txt_path, encoding='utf-8')
-	uni_sorted_file.columns = ['uni_count','word']	
+			if 'word' not in filterDF.columns:
+				raise ValueError('Retrieval file must have "word" column')
+			if ('count' in filterDF.columns):
+				filterDF = filterDF.rename(columns={'count': 'filter_count'})
+			elif ('frequency' in filterDF.columns):
+				filterDF = filterDF.rename(columns={'frequency': 'filter_count'})
+			else:
+				raise ValueError('Filter file must contain "count" or "frequency" column')	
 
-	print('Loading OPUS file...')		
-	wordlist_DF = pandas.read_table(wordlist_csv, encoding='utf-8', keep_default_na=False, na_values=[])
-	wordlist_DF.columns = ['opus_count','word']
+			merged = retrievalDF.merge(filterDF, left_on='word', right_on='word')
+		else: 
+			merged = retrievalDF
 
-	#filter with some Aspell rules
-	#aspellLang = language
-	#if aspellLang == 'pt':
-	#	aspellLang = 'pt-BR'
-	#wordList_DF['count']		
-	
-	#speller = aspell.Speller(('lang',aspellLang),('encoding','utf-8'))
-	#wordlist_DF['aspell_upper'] = [speller.check(x.title().encode('utf-8')) == 1 for x in wordlist_DF['word']]
-	#wordlist_DF['aspell_lower'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in wordlist_DF['word']]
+		merged = merged.sort_values(by='retrieval_count', ascending=False)
+		
+		# Dictionary-based filtering
+		merged = filterByDictionary(merged, dictionary_filter, language)
+		
+		#take the top n items after dictionary-based exclusion
+		wordsToRetrieve = merged['word'].head(retrieval_count).tolist()
 
-	#keep a form if it exists in the dictionary for the langauge—either as a proper noun or not
-	#wordlist_DF = wordlist_DF[wordlist_DF['aspell_upper'] | wordlist_DF['d_lower']]
+		print('Retrieving lexical surprisal estimates...')
+		surprisalEstimates = [get_mean_surp(bigrams, backward_zs, w, cutoff) for w in wordsToRetrieve]
 
-	#merge wordlist against the uni_sorted file
-	merged = wordlist_DF.merge(uni_sorted_file, left_on='word', right_on='word').sort_values(by=['uni_count'], ascending=False)
+		df = pandas.DataFrame(surprisalEstimates)
+		df.columns = ['word','mean_surprisal_weighted','mean_surprisal_unweighted','frequency','numContexts','retrievalTime']
+		df.to_csv(outputfile, index=False, encoding='utf-8')	
+		print('Done! Completed file is at '+outputfile+'; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 
 
-	frequent_words = merged['word'].tolist()[0:50000]
+def filterByDictionary(merged, dictionary_filter, language):		
+	if dictionary_filter is None :	
+		print('Not limiting words to a spelling dictionary')
+		pass
+	elif dictionary_filter in ('lowerInDictionary', 'inDictionary'):			
+		aspellLang = language
 
-	print('Retrieving lexical surprisal estimates...')
-	surprisalEstimates = [get_mean_surp(bigrams, backward_zs, w, cutoff) for w in frequent_words]
+		if aspellLang == 'pt':
+			aspellLang = 'pt-BR'
 
-	df = pandas.DataFrame(surprisalEstimates)
-	df.columns = ['word','mean_surprisal_weighted','mean_surprisal_unweighted','frequency','numContexts','retrievalTime']
-	df.to_csv(outputfile, index=False, encoding='utf-8')	
-	print('Done! Completed file is at '+outputfile+'; elapsed time is '+str(round(time.time()-start_time /  60., 5))+' minutes') 
+		speller = aspell.Speller(('lang',aspellLang),('encoding','utf-8'))
+
+		merged['aspell_lower'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in merged['word']]
+
+		if dictionary_filter == 'lowerInDictionary' and aspellLang != 'de':
+			print('Limiting to words with lower-case in spelling dictionary')
+			#German nouns are capitalized, so need to check upper case
+			merged = merged[merged['aspell_lower']]
+
+		else:			
+			print('Limiting to words with lower-case or upper-case in spelling dictionary')
+			merged['aspell_upper'] = [speller.check(x.lower().encode('utf-8')) == 1 for x in merged['word']]
+
+			merged = merged[merged['aspell_upper'] | merged['aspell_lower']]	
+	else:
+		raise ValueError('Dictionary specification not recognized. Choose None, "lowerInDictioanry" or "inDictionary"')	
+	return(merged)
 
 def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):	
 	start_time = time.time()	
@@ -726,7 +783,7 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 			num_context += 1
 			if context in bigrams_dict:
 				total_context_freq = bigrams_dict[context]
-				cond_prob = math.log(count / float(total_context_freq))
+				cond_prob = -1 * math.log(count / float(total_context_freq))
 				#print cond_prob
 				surprisal_total += (count * cond_prob) #this is weighted by the frequency of this context
 				unweightedSurprisal +=  cond_prob #this is not
@@ -738,35 +795,57 @@ def get_mean_surp(bigrams_dict,zs_file_backward, word, cutoff):
 			continue	
 	stop_time = time.time()
 	st = None if total_freq == 0 else surprisal_total / float(total_freq)
-	uwst = None if num_context == 0 else unweightedSurprisal / float(num_context)
+	uwst = None if num_context == 0 else -1 * unweightedSurprisal / float(num_context)
 	return (word, st, uwst, total_freq, num_context, (stop_time-start_time))
 
-def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
+def addSublexicalSurprisals(retrieval_file, retrieval_count, model_file,model_count, output_file, column, language, dictionary_filter):
 	'''get the probability of each word's letter sequence using the set of words in the language
 		#first argument is the set of types over which the model will be computed, in this case the 2013 subtitle data
 		#second argument is the name of the file to augment. If it doesn't exist, a new file is created
 		#third is the kind of model to build
 		#number of types in the model specifies how much of the first argument to use, e.g. 5k
 		#fifth is the country code, which is used in the call to espeak or aspell (or both?) 
-	''' 
+	''' 	
 	print('Retrieving sublexical surprisal estimates...')
-	
-	filename, file_extension = os.path.splitext(lexiconfile)
-	if(file_extension=='.txt'):
-		lex = pandas.read_table(lexiconfile, encoding='utf-8').dropna().head(n)
-	elif(file_extension=='.csv'):
-		lex = pandas.read_csv(lexiconfile, encoding='utf-8').dropna().head(n)		
 
-	sublexLMfileDir = os.path.join(os.path.dirname(augmentfile), column)
+	# Load the model DF
+	modelDF = readCSVorTxt(model_file)
+	if ('count' in modelDF.columns):
+		modelDF = modelDF.rename(columns={'count': 'retrieval_count'})
+	elif ('frequency' in lex.columns):
+		modelDF = modelDF.rename(columns={'frequency': 'retrieval_count'})
+	else:
+		raise ValueError('Model file must contain "count" or "frequency" column')	
+	modelDF = modelDF.sort_values(by='retrieval_count', ascending=False)	
+	modelDF = filterByDictionary(modelDF, dictionary_filter, language).head(model_count)
+
+	# Load the retrieval DF
+	retrievalDF = readCSVorTxt(retrieval_file)
+	if ('count' in retrievalDF.columns):
+		retrievalDF = retrievalDF.rename(columns={'count': 'retrieval_count'})
+	elif ('frequency' in lex.columns):
+		retrievalDF = retrievalDF.rename(columns={'frequency': 'retrieval_count'})
+	else:
+		raise ValueError('Retrieval file must contain "count" or "frequency" column')	
+	retrievalDF = retrievalDF.sort_values(by='retrieval_count', ascending=False)
+	retrievalDF = filterByDictionary(retrievalDF, dictionary_filter, language).head(retrieval_count)
+
+	sublexLMfileDir = os.path.join(os.path.dirname(output_file), column)
 	if not os.path.exists(sublexLMfileDir):
 		os.makedirs(sublexLMfileDir)
 
 	if column == 'character':				
-		pm = lex
-		pm['character'] = [list(x) for x in pm['word']]
-		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir = sublexLMfileDir)	
-		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
-	elif column == 'ipa':		
+		retrieval_pm = retrievalDF
+		model_pm = modelDF
+
+		retrieval_pm['character'] = [list(x) for x in retrieval_pm['word']]
+		model_pm['character'] = [list(x) for x in model_pm['word']]
+
+
+		LM = trainSublexicalSurprisalModel(model_pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir = sublexLMfileDir)	
+		retrieval_pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(retrieval_pm[column])]
+	
+	elif column == 'ipa':			
 		
 		#get the IPA representation from espeak
 		if language == u'en':
@@ -777,46 +856,57 @@ def addSublexicalSurprisals(lexiconfile, augmentfile, column, n, language):
 		else:
 			espeak_lang = language	
 
-		pronunciations = [espeak.espeak(espeak_lang,x) for x in lex['word']]				
-		pdf = pandas.DataFrame(pronunciations) #this has a column "ipa"		
-		pm = lex.merge(pdf, left_on="word", right_on="word")	#!!! this restricts the size of the model	
+		#need separate espeak transcriptions for the model file and the retrieval file
+		print('Retrieving IPA for words in model...')
+
+		model_pronunciations = [espeak.espeak(espeak_lang,x) for x in modelDF['word']]		
+		model_pdf = pandas.DataFrame(model_pronunciations) #this has a column "ipa"				
+		model_pm = modelDF.merge(model_pdf, left_on="word", right_on="word")	
+
+		print('Retrieving IPA for all words in sample...')		
+		retrieval_pronunciations = [espeak.espeak(espeak_lang,x) for x in retrievalDF['word']]	
+		retrieval_pdf = pandas.DataFrame(retrieval_pronunciations) #this has a column "ipa"				
+		retrieval_pm = retrievalDF.merge(retrieval_pdf, left_on="word", right_on="word")	
 		#exclude items where pronunctiation is more than twice as long as the number of characters. This filters out many abbreviations  
-		pm['nSounds'] = [len(x) for x in pm['ipa']]	
-		pm['suspect'] = pm.apply(lambda x: (x['nSounds']/2.) > len(x['word']), axis=1)
-		pm = pm.ix[~pm['suspect']][0:n]
-		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir=sublexLMfileDir)	
-		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
+		retrieval_pm['nSounds'] = [len(x) for x in retrieval_pm['ipa']]	
+		retrieval_pm['suspect'] = retrieval_pm.apply(lambda x: (x['nSounds']/2.) > len(x['word']), axis=1)
+		retrieval_pm = retrieval_pm.ix[~retrieval_pm['suspect']]
+		
+		LM = trainSublexicalSurprisalModel(model_pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir=sublexLMfileDir)	
+		retrieval_pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(retrieval_pm[column])]
+	
 	elif column == 'ortho':
-		pm = lex
-		pm['ortho'] = [list(x) for x in pm['word']]
-		pm[column+'_ss_array'] = [[1]*len(x) for x in pm['ortho']]
+		retrieval_pm = retrievalDF
+		retrieval_pm['ortho'] = [list(x) for x in retrieval_pm['word']]
+		retrieval_pm[column+'_ss_array'] = [[1]*len(x) for x in retrieval_pm['ortho']]
 
 		#use pm['word']
-	elif column == 'sampa':			
-		pm =  lex
-		if not 'sampa' in pm.columns:
+	elif column == 'sampa':		
+		raise ValueError('Out of date procedure for obtaining SAMPA model')	
+		retrieval_pm =  retrievalDF
+		if not 'sampa' in retrieval_pm.columns:
 			print 'Must have SAMPA column to compute sublexical model for SAMPA'
 			return None #can't compute SAMPA on the fly
-		pm['sampa'] = [x.split(' ') for x in pm['sampa']]
-		LM = trainSublexicalSurprisalModel(pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir= sublexLMfileDir)	
-		pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(pm[column])]
+		retrieval_pm['sampa'] = [x.split(' ') for x in retrieval_pm['sampa']]
+		LM = trainSublexicalSurprisalModel(modelDF, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir= sublexLMfileDir)	
+		retrieval_pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(retrieval_pm[column])]
 	else:
 		raise ValueError('Acceptable column types are sampa, character, and ortho')	
 	
 	
-	pm[column+'_ss'] = [sum(x) if x is not None else 0 for x in pm[column+'_ss_array']]	
-	pm[column+'_n'] = [len(x) if x is not None else 0 for x in pm[column+'_ss_array']]
+	retrieval_pm[column+'_ss'] = [sum(x) if x is not None else 0 for x in retrieval_pm[column+'_ss_array']]	
+	retrieval_pm[column+'_n'] = [len(x) if x is not None else 0 for x in retrieval_pm[column+'_ss_array']]
 	
-	#add the new results to the augmentfile and write it out
-	if os.path.exists(augmentfile):
-		aug = pandas.read_csv(augmentfile, encoding='utf-8').dropna()	
+	#add the new results to the output_file and write it out
+	if os.path.exists(output_file):
+		aug = pandas.read_csv(output_file, encoding='utf-8').dropna()	
 		if column in aug.columns:
 			#columns already exist in the file, so we want to overwrite it
-			pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']].to_csv(augmentfile, index=False, encoding='utf-8')			
+			retrieval_pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']].to_csv(output_file, index=False, encoding='utf-8')			
 		else:				
-			aug.merge(pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']], left_on="word", right_on="word").to_csv(augmentfile, index=False, encoding='utf-8')
+			aug.merge(retrieval_pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']], left_on="word", right_on="word").to_csv(output_file, index=False, encoding='utf-8')
 	else: 
-		pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']].to_csv(augmentfile, index=False, encoding='utf-8')			
+		retrieval_pm[['word', column, column+'_ss_array', column+'_ss', column+'_n']].to_csv(output_file, index=False, encoding='utf-8')			
 	print('Done!')
 
 def trainSublexicalSurprisalModel(wordlist_DF, column, order, smoothing, smoothOrder, interpolate, sublexlmfiledir):	

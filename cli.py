@@ -148,14 +148,17 @@ def cleanTextFile(inputfile, outputfile, cleaningFunction):
 @cli.command() 
 @click.option('--backwards_zs', type=click.Path(), help="Filename of the backwards language model of the highest order", required=True)
 @click.option('--forwards_txt', type=click.Path(), help="Filename of the forwards language model of order n-1", required=True)
-@click.option('--unigram_txt', type=click.Path(), help="Filename of the unigram frequency file", required=True)
-@click.option('--wordlist_csv', type=click.Path(), help="Filename of the wordlist CSV to check against; words should be in the first column", required=True)
+@click.option('--filter_file', type=click.Path(), help='Filename of the file to use as a filter (using "words" column', required=True)
+@click.option('--retrieval_file', type=click.Path(), help='Filename of the file with the list of items to retrieve in the "words" column' , required=True)
 @click.option('--cutoff', type=int, default=0, help="Discard ngrams from highest order model with frequency < n", required=True)
 @click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
 @click.option('--language', type=str, help="2-letter language code", required=True)
-def getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cutoff, outputfile, language):
+@click.option('--retrieval_count', type=int, help="Number of items to retrieve from the retrieval file", required=True)
+@click.option('--dictionary_filter', help="Should the items be filtered by a dictionary. Accepted values are 'lowerInDictioanry', 'upperInDictionary' and None", required=True)
+
+def getMeanSurprisal(backwards_zs_path, forwards_txt_path, filter_file, retrieval_file, cutoff, outputfile, language, retrieval_count, dictionary_filter):
 	'''Compute mean surprisal / information content for a list of words'''
-	ngrok.getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cutoff, outputfile, language)	
+	ngrok.getMeanSurprisal(backwards_zs_path, forwards_txt_path, filter_file, retrieval_file, cutoff, outputfile, language, retrieval_count, dictionary_filter)	
 
 #addSublexicalSurprisals
 @cli.command() 
@@ -164,9 +167,10 @@ def getMeanSurprisal(backwards_zs, forwards_txt, unigram_txt, wordlist_csv, cuto
 @click.option('--column', type=str, help="name of the column to build the sublexical surprisal model from", required=True)
 @click.option('--n', type=int, help="Number of types to use in the model. Input file must be ordered for this to make sense. -1 indicates use the entire 'word' column")
 @click.option('--language', type=str, help="2-letter language code", required=True)
-def addSublexicalSurprisals(inputfile, outputfile, column, n, language):
+@click.option('--dictionary_filter', help="Should the items be filtered by a dictionary. Accepted values are 'lowerInDictioanry', 'upperInDictionary' and None", required=True)
+def addSublexicalSurprisals(inputfile, outputfile, column, n, language, dictionary_filter):
 	'''get the probability of each word's letter sequence using the set of words in the language'''
-	ngrok.addSublexicalSurprisals(inputfile, outputfile, column, n, language)
+	ngrok.addSublexicalSurprisals(inputfile, outputfile, column, n, language,dictionary_filter)
 
 #analyzeSurprisalCorrelations
 @cli.command() 
