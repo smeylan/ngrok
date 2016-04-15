@@ -843,8 +843,8 @@ def addSublexicalSurprisals(retrieval_file, retrieval_count, model_file,model_co
 
 
 		LM = trainSublexicalSurprisalModel(model_pm, column, order=5, smoothing='kn', smoothOrder=[3,4,5], interpolate=True, sublexlmfiledir = sublexLMfileDir)	
-		retrieval_pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(retrieval_pm[column])]
-	
+		retrieval_pm[column+'_ss_array']   = [getSublexicalSurprisal(transcription, LM, 5, 'letters', returnSum=False) for transcription in list(retrieval_pm[column])]	
+
 	elif column == 'ipa':			
 		
 		#get the IPA representation from espeak

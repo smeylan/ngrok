@@ -162,15 +162,17 @@ def getMeanSurprisal(backwards_zs_path, forwards_txt_path, filter_file, retrieva
 
 #addSublexicalSurprisals
 @cli.command() 
-@click.option('--inputfile', type=click.Path(), help="Filename of the input files. Must contain 'word' as a column name", required=True)
-@click.option('--outputfile', type=click.Path(), help="Filename of the output file", required=True)
+@click.option('--retrieval_file', type=click.Path(), help="Filename of the file with the retrieval list. Must contain 'word' as a column name", required=True)
+@click.option('--retrieval_count', type=int, help="Number of types to retrieve. Input file must be ordered for this to make sense. -1 indicates use the entire 'word' column")
+@click.option('--model_file', type=click.Path(), help="Filename of the file to use to build the model. Must contain 'word' as a column name", required=True)
+@click.option('--model_count', type=int, help="Number of types to use to construct the model. Input file must be ordered for this to make sense. -1 indicates use the entire 'word' column")
+@click.option('--output_file', type=click.Path(), help="Filename of the output file", required=True)
 @click.option('--column', type=str, help="name of the column to build the sublexical surprisal model from", required=True)
-@click.option('--n', type=int, help="Number of types to use in the model. Input file must be ordered for this to make sense. -1 indicates use the entire 'word' column")
 @click.option('--language', type=str, help="2-letter language code", required=True)
 @click.option('--dictionary_filter', help="Should the items be filtered by a dictionary. Accepted values are 'lowerInDictioanry', 'upperInDictionary' and None", required=True)
-def addSublexicalSurprisals(inputfile, outputfile, column, n, language, dictionary_filter):
+def addSublexicalSurprisals(retrieval_file, retrieval_count, model_file,model_count, output_file, column, language, dictionary_filter):
 	'''get the probability of each word's letter sequence using the set of words in the language'''
-	ngrok.addSublexicalSurprisals(inputfile, outputfile, column, n, language,dictionary_filter)
+	ngrok.addSublexicalSurprisals(retrieval_file, retrieval_count, model_file,model_count, output_file, column, language, dictionary_filter)
 
 #analyzeSurprisalCorrelations
 @cli.command() 
